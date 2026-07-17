@@ -1,0 +1,37 @@
+# Test/lint configuration for the FortiGate Cloud connector.
+#
+# This file is config-only — the connector ships as an RPM to the FortiSOAR
+# appliance runtime, not as a wheel — so there is intentionally no
+# [build-system] or [project] table. Runtime deps live in
+# fortigate-cloud/requirements.txt.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+# The connector ships to the FortiSOAR appliance runtime, which is Python 3.9
+# on 7.6.x — so target the lowest runtime, not the dev machine's interpreter.
+target-version = "py39"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle, isort, pyupgrade, bugbear
+select = ["F", "E", "W", "I", "UP", "B"]
+# The connector follows the Fortinet connector house style, which predates this
+# repo's linting: `'{0}'.format(x)` for interpolation (UP030/UP032) and a bare
+# `raise ConnectorError(err)` inside `except` (B904). The FortiSOAR runtime logs
+# the original traceback via `logger.exception` before re-raising, so B904's
+# lost-context concern does not apply here. Rewriting these would churn every
+# live-verified module for no behavior change.
+ignore = ["UP030", "UP032", "B904"]
+
+[tool.mypy]
+# Target the appliance floor (7.6.x = Python 3.9) so local mypy on a newer
+# interpreter can't silently accept 3.10+ syntax that would fail on-box.
+python_version = "3.9"
+# The connector runs inside the FortiSOAR appliance runtime, whose packages
+# (connectors.core, integrations.crudhub, connectors.cyops_utilities, django)
+# are not pip-installable off-box. Treat them as untyped externals. Note this
+# suppresses import-not-found, NOT import-untyped — third-party libs without
+# bundled types need stub packages (e.g. types-requests) in requirements-dev.
+ignore_missing_imports = true

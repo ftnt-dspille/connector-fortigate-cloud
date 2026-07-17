@@ -1,0 +1,650 @@
+{
+  "name": "fortigate-cloud",
+  "label": "FortiGate Cloud",
+  "version": "1.0.0",
+  "description": "FortiGate Cloud is a cloud-based management platform for FortiGate devices. This connector facilitates automated operations to retrieve and add devices provisioned to FortiGate Cloud, manage their configuration backup and report schedules, and proxy FortiOS API calls to a managed FortiGate through FortiGate Cloud.",
+  "publisher": "Fortinet CSE",
+  "cs_approved": false,
+  "cs_compatible": true,
+  "category": "Network Security",
+  "icon_small_name": "fortigate_cloud_small.png",
+  "icon_large_name": "fortigate_cloud_medium.png",
+  "help_online": "",
+  "configuration": {
+    "fields": [
+      {
+        "name": "region",
+        "title": "Region",
+        "type": "select",
+        "editable": true,
+        "visible": true,
+        "required": true,
+        "description": "Select the FortiGate Cloud region that hosts your account. A device is only visible from the region it was provisioned into.",
+        "tooltip": "Select the FortiGate Cloud region that hosts your account. A device is only visible from the region it was provisioned into.",
+        "value": "Global",
+        "options": [
+          "Global",
+          "US",
+          "EU",
+          "Japan"
+        ]
+      },
+      {
+        "name": "server_url",
+        "title": "Server URL",
+        "type": "text",
+        "editable": true,
+        "visible": true,
+        "required": false,
+        "description": "Optionally specify the FortiGate Cloud API URL to override the selected region, for example https://api.fortigate.forticloud.com. Leave blank to use the region.",
+        "tooltip": "Optionally specify the FortiGate Cloud API URL to override the selected region, for example https://api.fortigate.forticloud.com. Leave blank to use the region."
+      },
+      {
+        "name": "api_id",
+        "title": "API ID",
+        "type": "text",
+        "editable": true,
+        "visible": true,
+        "required": true,
+        "description": "Specify the API ID, i.e. the username of the FortiCloud IAM API user, in UUID format XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX. The IAM API user must be granted Admin permissions for FortiGate Cloud.",
+        "tooltip": "Specify the API ID, i.e. the username of the FortiCloud IAM API user, in UUID format XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX. The IAM API user must be granted Admin permissions for FortiGate Cloud."
+      },
+      {
+        "name": "password",
+        "title": "Password",
+        "type": "password",
+        "editable": true,
+        "visible": true,
+        "required": true,
+        "description": "Specify the password of the FortiCloud IAM API user.",
+        "tooltip": "Specify the password of the FortiCloud IAM API user."
+      },
+      {
+        "name": "client_id",
+        "title": "Client ID",
+        "type": "text",
+        "editable": true,
+        "visible": true,
+        "required": true,
+        "description": "Specify the client ID used to request the FortiGate Cloud access token.",
+        "tooltip": "Specify the client ID used to request the FortiGate Cloud access token.",
+        "value": "fortigatecloud"
+      },
+      {
+        "name": "verify_ssl",
+        "title": "Verify SSL",
+        "type": "checkbox",
+        "editable": true,
+        "visible": true,
+        "required": false,
+        "description": "Specifies whether the SSL certificate for the server is to be verified.",
+        "tooltip": "Specifies whether the SSL certificate for the server is to be verified.",
+        "value": true
+      }
+    ]
+  },
+  "operations": [
+    {
+      "operation": "get_devices",
+      "title": "Get Devices",
+      "annotation": "get_devices",
+      "description": "Retrieves the list of devices provisioned to FortiGate Cloud, optionally paginated and sorted.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "limit",
+          "title": "Limit",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the maximum number of devices to retrieve per page.",
+          "tooltip": "Specify the maximum number of devices to retrieve per page.",
+          "placeholder": "For example: 10"
+        },
+        {
+          "name": "offset",
+          "title": "Offset",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the index of the first device to retrieve, starting from 0.",
+          "tooltip": "Specify the index of the first device to retrieve, starting from 0.",
+          "placeholder": "For example: 0"
+        },
+        {
+          "name": "sort",
+          "title": "Sort",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the field by which to sort the results. Only 'sn' is supported.",
+          "tooltip": "Specify the field by which to sort the results. Only 'sn' is supported.",
+          "placeholder": "sn"
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "get_device",
+      "title": "Get Device",
+      "annotation": "get_device",
+      "description": "Retrieves the details of a specific device provisioned to FortiGate Cloud based on its serial number.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "add_device",
+      "title": "Add Device",
+      "annotation": "add_device",
+      "description": "Adds a device to FortiGate Cloud using its device key.",
+      "category": "containment",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "device_key",
+          "title": "Device Key",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the device key of the device to add to FortiGate Cloud.",
+          "tooltip": "Specify the device key of the device to add to FortiGate Cloud."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "update_device_management",
+      "title": "Update Device Management",
+      "annotation": "update_device_management",
+      "description": "Enables or disables the FortiGate Cloud management feature for a device. Enabling management requires the FortiGate 'admin' user credentials; disabling it does not.",
+      "category": "containment",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "management",
+          "title": "Enable Management",
+          "type": "checkbox",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Select this option to enable the management feature for the device, or clear it to disable management.",
+          "tooltip": "Select this option to enable the management feature for the device, or clear it to disable management.",
+          "value": true
+        },
+        {
+          "name": "username",
+          "title": "Username",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the FortiGate 'admin' user name. Required when enabling management.",
+          "tooltip": "Specify the FortiGate 'admin' user name. Required when enabling management."
+        },
+        {
+          "name": "password",
+          "title": "Password",
+          "type": "password",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the FortiGate 'admin' user password. Required when enabling management.",
+          "tooltip": "Specify the FortiGate 'admin' user password. Required when enabling management."
+        },
+        {
+          "name": "force_password_change",
+          "title": "Force Password Change",
+          "type": "checkbox",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Select this option to force a password change on the device.",
+          "tooltip": "Select this option to force a password change on the device.",
+          "value": false
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "get_report_schedules",
+      "title": "Get Report Schedules",
+      "annotation": "get_report_schedules",
+      "description": "Retrieves all report schedules configured for a device on FortiGate Cloud.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "get_report_schedule",
+      "title": "Get Report Schedule",
+      "annotation": "get_report_schedule",
+      "description": "Retrieves a specific report schedule configured for a device on FortiGate Cloud based on its OID.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "oid",
+          "title": "Schedule OID",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the OID of the report schedule to retrieve.",
+          "tooltip": "Specify the OID of the report schedule to retrieve."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "add_report_schedule",
+      "title": "Add or Update Report Schedule",
+      "annotation": "add_report_schedule",
+      "description": "Adds a report schedule for a device on FortiGate Cloud, or updates an existing schedule when its OID is specified.",
+      "category": "miscellaneous",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "config_oid",
+          "title": "Config OID",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the OID of the report configuration to schedule.",
+          "tooltip": "Specify the OID of the report configuration to schedule."
+        },
+        {
+          "name": "oid",
+          "title": "Schedule OID",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the OID of an existing report schedule to update. Leave blank to add a new schedule.",
+          "tooltip": "Specify the OID of an existing report schedule to update. Leave blank to add a new schedule."
+        },
+        {
+          "name": "schedule_type",
+          "title": "Schedule Type",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify how often the report runs, for example: daily.",
+          "tooltip": "Specify how often the report runs, for example: daily.",
+          "placeholder": "For example: daily"
+        },
+        {
+          "name": "vdom",
+          "title": "VDOM",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the VDOM for which to generate the report.",
+          "tooltip": "Specify the VDOM for which to generate the report."
+        },
+        {
+          "name": "email",
+          "title": "Email",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the email address to which to send the report.",
+          "tooltip": "Specify the email address to which to send the report."
+        },
+        {
+          "name": "email_flag",
+          "title": "Send Email",
+          "type": "checkbox",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Select this option to email the report when it is generated.",
+          "tooltip": "Select this option to email the report when it is generated.",
+          "value": false
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "delete_report_schedule",
+      "title": "Delete Report Schedule",
+      "annotation": "delete_report_schedule",
+      "description": "Deletes a report schedule from a device on FortiGate Cloud based on its OID.",
+      "category": "miscellaneous",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "oid",
+          "title": "Schedule OID",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the OID of the report schedule to delete.",
+          "tooltip": "Specify the OID of the report schedule to delete."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "get_auto_backup_setting",
+      "title": "Get Config Auto Backup Setting",
+      "annotation": "get_auto_backup_setting",
+      "description": "Retrieves the configuration auto backup setting of a device on FortiGate Cloud.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "update_auto_backup_setting",
+      "title": "Update Config Auto Backup Setting",
+      "annotation": "update_auto_backup_setting",
+      "description": "Updates the configuration auto backup setting of a device on FortiGate Cloud.",
+      "category": "miscellaneous",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "enable",
+          "title": "Enable Auto Backup",
+          "type": "checkbox",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Select this option to enable configuration auto backup for the device.",
+          "tooltip": "Select this option to enable configuration auto backup for the device.",
+          "value": true
+        },
+        {
+          "name": "backup_option",
+          "title": "Backup Option",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify when a backup is taken, for example: PERSESSION.",
+          "tooltip": "Specify when a backup is taken, for example: PERSESSION.",
+          "placeholder": "For example: PERSESSION"
+        },
+        {
+          "name": "alert",
+          "title": "Alert",
+          "type": "checkbox",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Select this option to send an alert when a configuration backup occurs.",
+          "tooltip": "Select this option to send an alert when a configuration backup occurs.",
+          "value": false
+        },
+        {
+          "name": "alert_lang",
+          "title": "Alert Language",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the language of the alert email, for example: en.",
+          "tooltip": "Specify the language of the alert email, for example: en.",
+          "placeholder": "For example: en"
+        },
+        {
+          "name": "alert_emails",
+          "title": "Alert Emails",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the email addresses to which to send backup alerts.",
+          "tooltip": "Specify the email addresses to which to send backup alerts."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "fos_api_call",
+      "title": "Call FortiOS API",
+      "annotation": "fos_api_call",
+      "description": "Proxies a FortiOS API call to a managed FortiGate through FortiGate Cloud. The FortiGate must be deployed to FortiGate Cloud with configuration management enabled and its management tunnel online. Only the GET method is available on free FortiGate Cloud accounts; the POST, PUT and DELETE methods require a paid FortiGate.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "method",
+          "title": "Method",
+          "type": "select",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Select the HTTP method of the FortiOS API call. POST, PUT and DELETE require a paid FortiGate.",
+          "tooltip": "Select the HTTP method of the FortiOS API call. POST, PUT and DELETE require a paid FortiGate.",
+          "value": "GET",
+          "options": [
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE"
+          ]
+        },
+        {
+          "name": "fos_api_path",
+          "title": "FortiOS API Path",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the FortiOS API path to call, for example: api/v2/monitor/license/status. Refer to the FortiOS API documentation for available paths.",
+          "tooltip": "Specify the FortiOS API path to call, for example: api/v2/monitor/license/status. Refer to the FortiOS API documentation for available paths.",
+          "placeholder": "For example: api/v2/monitor/firewall/policy"
+        },
+        {
+          "name": "query_parameters",
+          "title": "Query Parameters",
+          "type": "json",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the query parameters of the FortiOS API call as a JSON object. Refer to the FortiOS API documentation for available query parameters.",
+          "tooltip": "Specify the query parameters of the FortiOS API call as a JSON object. Refer to the FortiOS API documentation for available query parameters."
+        },
+        {
+          "name": "payload",
+          "title": "Payload",
+          "type": "json",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the request body of the FortiOS API call as a JSON object. Applies to the POST and PUT methods.",
+          "tooltip": "Specify the request body of the FortiOS API call as a JSON object. Applies to the POST and PUT methods."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "generic_api_call",
+      "title": "Generic API Call",
+      "annotation": "generic_api_call",
+      "description": "Makes an arbitrary call to the FortiGate Cloud API. Use this operation to reach endpoints that this connector does not expose as a dedicated action.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "method",
+          "title": "Method",
+          "type": "select",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Select the HTTP method of the API call.",
+          "tooltip": "Select the HTTP method of the API call.",
+          "value": "GET",
+          "options": [
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE"
+          ]
+        },
+        {
+          "name": "endpoint",
+          "title": "Endpoint",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the API endpoint to call, relative to the FortiGate Cloud API base path, for example: /devices.",
+          "tooltip": "Specify the API endpoint to call, relative to the FortiGate Cloud API base path, for example: /devices.",
+          "placeholder": "For example: /devices"
+        },
+        {
+          "name": "payload",
+          "title": "Payload",
+          "type": "json",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Specify the request body of the API call as a JSON object.",
+          "tooltip": "Specify the request body of the API call as a JSON object."
+        }
+      ],
+      "output_schema": {}
+    }
+  ]
+}

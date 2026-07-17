@@ -1,0 +1,42 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 = FortiSOAR 7.6.x appliance runtime floor; 3.12 = 8.0 runtime.
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Lint (ruff)
+        run: ruff check
+      - name: Type-check (mypy)
+        # The connector package dir must be named for the connector
+        # (`fortigate-cloud`) because FortiSOAR keys the bundle's top-level dir
+        # to the name in info.json. A hyphen is not a valid Python identifier,
+        # so mypy refuses any dir holding an __init__.py it can't name as a
+        # package. The appliance loads the connector dynamically and never
+        # imports it by that dotted name, so this only bites mypy. Point it at
+        # an underscore-named symlink: same files, package name it will accept.
+        run: |
+          ln -sfn fortigate-cloud fortigate_cloud
+          mypy fortigate_cloud
+          rm fortigate_cloud
+      - name: Test (pytest)
+        # Live FortiGate Cloud tests are skipped without RUN_LIVE_TESTS + creds.
+        run: pytest -v
