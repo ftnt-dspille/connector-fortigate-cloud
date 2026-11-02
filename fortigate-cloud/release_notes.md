@@ -1,3 +1,38 @@
+#### 1.1.0
+
+##### What's Added
+
+Seven curated operations that run FortiOS API calls on a cloud-managed FortiGate
+through the FortiGate Cloud proxy, so playbooks no longer have to assemble
+FortiOS paths themselves:
+
+- **Get FortiGate System Status**: hostname, model, firmware, serial, VDOM and
+  resource use of a managed FortiGate, retrieved through FortiGate Cloud.
+- **List Firewall Addresses** and **List Firewall Policies**: the device's
+  address objects and policies, in policy order, with limit/offset pagination.
+- **Create Firewall Address** and **Delete Firewall Address**: manage address
+  objects remotely; the IP accepts a single IPv4 address (a /32 object) or a
+  CIDR network.
+- **Block IP**: containment flow that creates (or reuses) an `FSR-BLOCK-<ip>`
+  address object and a deny policy matching only that address, then moves the
+  policy to the top of the policy order. Traffic to or from other hosts is not
+  affected. Idempotent.
+- **Unblock IP**: removes exactly the objects Block IP created, and keeps the
+  address object if a policy the connector did not create still references it.
+  Idempotent.
+
+##### Notes
+
+- The curated reads work on free FortiGate Cloud accounts. The writes, including
+  Block IP and Unblock IP, require a paid FortiGate; an unentitled device
+  answers `403 permission_deny` before the management tunnel is consulted.
+- Block IP / Unblock IP only ever touch objects named `FSR-BLOCK-<ip>` (dots
+  replaced with underscores). Unblock IP is safe to run at any time: objects
+  that are already absent are reported, not treated as errors.
+- FortiGate Cloud has been renamed FortiManagement Cloud. Hosts, API paths and
+  the `fortigatecloud` client id are unchanged, and this connector keeps its
+  `fortigate-cloud` name so existing deployments upgrade in place.
+
 #### 1.0.0
 
 ##### What's Added

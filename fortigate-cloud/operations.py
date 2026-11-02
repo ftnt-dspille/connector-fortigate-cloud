@@ -19,6 +19,15 @@ from .device_actions import (
     update_auto_backup_setting,
     update_device_management,
 )
+from .fgt_proxy_actions import (
+    block_ip,
+    create_firewall_address,
+    delete_firewall_address,
+    get_fgt_system_status,
+    list_firewall_addresses,
+    list_firewall_policies,
+    unblock_ip,
+)
 from .fos_actions import fos_api_call
 from .generic_api_call import generic_api_call
 from .make_rest_api_call import MakeRestApiCall
@@ -55,4 +64,11 @@ operations = {
     "update_auto_backup_setting": update_auto_backup_setting,
     "fos_api_call": fos_api_call,
     "generic_api_call": generic_api_call,
+    "get_fgt_system_status": get_fgt_system_status,
+    "list_firewall_addresses": list_firewall_addresses,
+    "list_firewall_policies": list_firewall_policies,
+    "create_firewall_address": create_firewall_address,
+    "delete_firewall_address": delete_firewall_address,
+    "block_ip": block_ip,
+    "unblock_ip": unblock_ip,
 }

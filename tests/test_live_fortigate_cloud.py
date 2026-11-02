@@ -15,9 +15,10 @@ Credentials are read from a .env file at the repo root, or from the environment:
 The IAM API user must have Admin permissions for FortiGate Cloud, otherwise every
 call returns 401 invalid_client even though the token grant itself succeeds.
 
-These tests are READ-ONLY. They never add a device, change management state,
-write a schedule, or alter a backup setting. Write operations against a real
-FortiGate are left to manual verification.
+These tests are read-only except test_live_block_unblock_ip_flow, which writes a
+TEST-NET-3 (documentation-only) deny policy to the configured device and removes
+it again before the test ends; on a device without write entitlement it skips
+with the vendor's 403 permission_deny reason instead of failing.
 
 Note on lockout: FortiCloud throttles repeated password grants with an
 invalid_grant lockout that applies to every client_id on the account and clears
@@ -119,25 +120,104 @@ def test_live_get_auto_backup_setting(ops, live_config):
 
 @pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
 def test_live_fos_api_call_license_status(ops, live_config):
-    """Requires the FortiGate to be online with configuration management enabled
-    and its management tunnel up. GET works on free accounts.
+    """Requires the FortiGate to be online with its management tunnel up.
+    GET works on free accounts.
 
     Skips rather than fails when the device has no tunnel: that is an environment
     prerequisite, not a connector defect. The device API is queried first so the
     skip reason states the actual device state.
+
+    The gate is tunnelAlive only: the live validation of this connector showed
+    that `management: false` on the device record does not block the FortiOS
+    proxy - the deciding fields are the tunnel and the paid entitlement.
     """
     device = ops.operations['get_device'](live_config, {'sn': TEST_SN})
-    if not (device.get('management') and device.get('tunnelAlive')):
+    if not device.get('tunnelAlive'):
         pytest.skip(
-            'device {0} cannot serve the FortiOS proxy: management={1}, tunnelAlive={2}. '
-            'Deploy the FortiGate to FortiGate Cloud, enable configuration management, '
-            'and bring its management tunnel online.'.format(
-                TEST_SN, device.get('management'), device.get('tunnelAlive'))
+            'device {0} cannot serve the FortiOS proxy: tunnelAlive={1}. '
+            'Deploy the FortiGate to FortiGate Cloud and bring its management '
+            'tunnel online.'.format(TEST_SN, device.get('tunnelAlive'))
         )
     result = ops.operations['fos_api_call'](live_config, {
         'sn': TEST_SN, 'method': 'GET', 'fos_api_path': 'api/v2/monitor/license/status',
     })
     assert result is not None
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_get_fgt_system_status(ops, live_config):
+    device = ops.operations['get_device'](live_config, {'sn': TEST_SN})
+    if not device.get('tunnelAlive'):
+        pytest.skip('device {0} tunnel is down; the FortiOS proxy needs it up'.format(TEST_SN))
+    result = ops.operations['get_fgt_system_status'](live_config, {'sn': TEST_SN})
+    results = result.get('results') or {}
+    assert results.get('hostname'), 'expected a hostname in the system status'
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_list_firewall_addresses(ops, live_config):
+    device = ops.operations['get_device'](live_config, {'sn': TEST_SN})
+    if not device.get('tunnelAlive'):
+        pytest.skip('device {0} tunnel is down; the FortiOS proxy needs it up'.format(TEST_SN))
+    result = ops.operations['list_firewall_addresses'](live_config, {'sn': TEST_SN, 'limit': 5})
+    assert isinstance(result.get('results'), list)
+    assert 'matched_count' in result
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_list_firewall_policies(ops, live_config):
+    device = ops.operations['get_device'](live_config, {'sn': TEST_SN})
+    if not device.get('tunnelAlive'):
+        pytest.skip('device {0} tunnel is down; the FortiOS proxy needs it up'.format(TEST_SN))
+    result = ops.operations['list_firewall_policies'](live_config, {'sn': TEST_SN, 'limit': 5})
+    assert isinstance(result.get('results'), list)
+    assert 'matched_count' in result
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_block_unblock_ip_flow(ops, live_config, connector_error):
+    """The full block/unblock containment flow against a real device.
+
+    Writes only a TEST-NET-3 (documentation-only) address: the deny policy it
+    creates matches traffic from 203.0.113.77 and nothing else, and unblock_ip
+    removes every object it created before the test ends. Run this against a
+    device you are authorized to change.
+
+    Skips with the vendor reason when the device is not entitled for proxy
+    writes (403 permission_deny) - that is an account entitlement, not a
+    connector defect.
+    """
+    device = ops.operations['get_device'](live_config, {'sn': TEST_SN})
+    if not device.get('tunnelAlive'):
+        pytest.skip('device {0} tunnel is down; the FortiOS proxy needs it up'.format(TEST_SN))
+    try:
+        result = ops.operations['block_ip'](live_config, {
+            'sn': TEST_SN, 'ip': '203.0.113.77', 'direction': 'inbound',
+        })
+    except connector_error as err:
+        if 'permission_deny' in str(err):
+            pytest.skip(
+                'device {0} is not entitled for FortiOS proxy writes (403 '
+                'permission_deny); block_ip needs a paid FortiGate'.format(TEST_SN)
+            )
+        raise
+    try:
+        assert result['address']['name'] == 'FSR-BLOCK-203_0_113_77'
+        assert result['policies'][0]['created'] is True
+        policies = ops.operations['list_firewall_policies'](live_config,
+                                                             {'sn': TEST_SN, 'limit': 10})
+        names = [p.get('name') for p in policies.get('results') or []]
+        assert names and names[0] == 'FSR-BLOCK-203_0_113_77-INBOUND', \
+            'the deny policy should sit at the top of the policy order'
+    finally:
+        removed = ops.operations['unblock_ip'](live_config, {'sn': TEST_SN,
+                                                             'ip': '203.0.113.77'})
+    assert removed['removed_policies'], 'expected the deny policy to be removed'
+    assert removed['address_removed'] is True
+    policies = ops.operations['list_firewall_policies'](live_config,
+                                                        {'sn': TEST_SN, 'limit': 10})
+    names = [p.get('name') for p in policies.get('results') or []]
+    assert 'FSR-BLOCK-203_0_113_77-INBOUND' not in names
 
 
 def test_live_bad_credentials_are_rejected(ops, live_config, connector_error):

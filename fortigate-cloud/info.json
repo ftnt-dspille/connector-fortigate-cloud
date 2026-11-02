@@ -1,8 +1,8 @@
 {
   "name": "fortigate-cloud",
   "label": "FortiGate Cloud",
-  "version": "1.0.0",
-  "description": "FortiGate Cloud is a cloud-based management platform for FortiGate devices. This connector facilitates automated operations to retrieve and add devices provisioned to FortiGate Cloud, manage their configuration backup and report schedules, and proxy FortiOS API calls to a managed FortiGate through FortiGate Cloud.",
+  "version": "1.1.0",
+  "description": "FortiGate Cloud is a cloud-based management platform for FortiGate devices. This connector facilitates automated operations to retrieve and add devices provisioned to FortiGate Cloud, manage their configuration backup and report schedules, proxy FortiOS API calls to a managed FortiGate through FortiGate Cloud, and run curated FortiOS proxy operations on a managed FortiGate, including blocking and unblocking IP addresses.",
   "publisher": "Fortinet CSE",
   "cs_approved": false,
   "cs_compatible": true,
@@ -642,6 +642,326 @@
           "required": false,
           "description": "Specify the request body of the API call as a JSON object.",
           "tooltip": "Specify the request body of the API call as a JSON object."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "get_fgt_system_status",
+      "title": "Get FortiGate System Status",
+      "annotation": "get_fgt_system_status",
+      "description": "Reads the FortiOS system status (hostname, model, firmware, serial, VDOM, resource use) of a FortiGate managed by FortiGate Cloud, through the FortiGate Cloud FortiOS proxy.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "list_firewall_addresses",
+      "title": "List Firewall Addresses",
+      "annotation": "list_firewall_addresses",
+      "description": "Lists the firewall address objects configured on a FortiGate managed by FortiGate Cloud, through the FortiGate Cloud FortiOS proxy. Supports limit and offset pagination.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "limit",
+          "title": "Limit",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Maximum number of address objects to return (1-1000). Defaults to 100.",
+          "tooltip": "Maximum number of address objects to return (1-1000). Defaults to 100.",
+          "placeholder": "100"
+        },
+        {
+          "name": "offset",
+          "title": "Offset",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Number of address objects to skip, for pagination.",
+          "tooltip": "Number of address objects to skip, for pagination.",
+          "placeholder": "0"
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "list_firewall_policies",
+      "title": "List Firewall Policies",
+      "annotation": "list_firewall_policies",
+      "description": "Lists the firewall policies configured on a FortiGate managed by FortiGate Cloud, in policy order (top of the match order first), through the FortiGate Cloud FortiOS proxy.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "limit",
+          "title": "Limit",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Maximum number of policies to return (1-1000). Defaults to 100.",
+          "tooltip": "Maximum number of policies to return (1-1000). Defaults to 100.",
+          "placeholder": "100"
+        },
+        {
+          "name": "offset",
+          "title": "Offset",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Number of policies to skip, for pagination.",
+          "tooltip": "Number of policies to skip, for pagination.",
+          "placeholder": "0"
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "create_firewall_address",
+      "title": "Create Firewall Address",
+      "annotation": "create_firewall_address",
+      "description": "Creates a firewall address object on a FortiGate managed by FortiGate Cloud, through the FortiGate Cloud FortiOS proxy. The IP accepts a single IPv4 address (a /32 object) or a CIDR network. Writes through the FortiOS proxy require a paid FortiGate; an unentitled device answers 403 permission_deny.",
+      "category": "containment",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "name",
+          "title": "Address Name",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Name of the firewall address object to create.",
+          "tooltip": "Name of the firewall address object to create."
+        },
+        {
+          "name": "ip",
+          "title": "IP or CIDR",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "IPv4 address or CIDR network for the address object, for example 203.0.113.10 or 203.0.113.0/24.",
+          "tooltip": "IPv4 address or CIDR network for the address object, for example 203.0.113.10 or 203.0.113.0/24."
+        },
+        {
+          "name": "comment",
+          "title": "Comment",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Optional comment stored on the address object.",
+          "tooltip": "Optional comment stored on the address object."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "delete_firewall_address",
+      "title": "Delete Firewall Address",
+      "annotation": "delete_firewall_address",
+      "description": "Deletes a firewall address object on a FortiGate managed by FortiGate Cloud, through the FortiGate Cloud FortiOS proxy. Writes through the FortiOS proxy require a paid FortiGate; an unentitled device answers 403 permission_deny.",
+      "category": "containment",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "name",
+          "title": "Address Name",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Name of the firewall address object to delete.",
+          "tooltip": "Name of the firewall address object to delete."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "block_ip",
+      "title": "Block IP",
+      "annotation": "block_ip",
+      "description": "Blocks an IPv4 address or CIDR on a FortiGate managed by FortiGate Cloud: creates (or reuses) an FSR-BLOCK-<ip> address object and a deny policy that matches only that address, then moves the policy to the top of the policy order. Traffic to or from other hosts is not affected. Idempotent: rerunning reuses existing objects. Writes through the FortiOS proxy require a paid FortiGate; an unentitled device answers 403 permission_deny.",
+      "category": "containment",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "ip",
+          "title": "IP or CIDR",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "IPv4 address or CIDR network to block, for example 203.0.113.10 or 203.0.113.0/24.",
+          "tooltip": "IPv4 address or CIDR network to block, for example 203.0.113.10 or 203.0.113.0/24."
+        },
+        {
+          "name": "direction",
+          "title": "Direction",
+          "type": "select",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Block traffic from the address (inbound), to the address (outbound), or both. Defaults to both.",
+          "tooltip": "Block traffic from the address (inbound), to the address (outbound), or both. Defaults to both.",
+          "value": "both",
+          "options": [
+            "inbound",
+            "outbound",
+            "both"
+          ]
+        },
+        {
+          "name": "srcintf",
+          "title": "Source Interfaces",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Comma-separated source interface names for the deny policy. Defaults to any.",
+          "tooltip": "Comma-separated source interface names for the deny policy. Defaults to any.",
+          "value": "any"
+        },
+        {
+          "name": "dstintf",
+          "title": "Destination Interfaces",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Comma-separated destination interface names for the deny policy. Defaults to any.",
+          "tooltip": "Comma-separated destination interface names for the deny policy. Defaults to any.",
+          "value": "any"
+        },
+        {
+          "name": "comment",
+          "title": "Comment",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Optional comment stored on the created address object and policies.",
+          "tooltip": "Optional comment stored on the created address object and policies."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "unblock_ip",
+      "title": "Unblock IP",
+      "annotation": "unblock_ip",
+      "description": "Removes what Block IP created for an IPv4 address or CIDR on a FortiGate managed by FortiGate Cloud: deletes the FSR-BLOCK deny policies, then deletes the address object unless a policy the connector did not create still references it. Idempotent: objects that are already absent are reported, not treated as errors. Writes through the FortiOS proxy require a paid FortiGate; an unentitled device answers 403 permission_deny.",
+      "category": "containment",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "ip",
+          "title": "IP or CIDR",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "IPv4 address or CIDR network to unblock, matching the value passed to Block IP.",
+          "tooltip": "IPv4 address or CIDR network to unblock, matching the value passed to Block IP."
         }
       ],
       "output_schema": {}

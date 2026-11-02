@@ -3,6 +3,11 @@
 Manages devices provisioned to FortiGate Cloud and proxies FortiOS API calls to
 managed FortiGates.
 
+> FortiGate Cloud has been renamed **FortiManagement Cloud**. Per Fortinet's
+> announcement no action is required: hosts, API paths and the `fortigatecloud`
+> client id are unchanged, and this connector keeps its `fortigate-cloud` name
+> so existing deployments upgrade in place.
+
 ## Operations
 
 | Operation | Method / path |
@@ -17,6 +22,13 @@ managed FortiGates.
 | Delete Report Schedule | `DELETE /devices/{sn}/reportschedules/{oid}` |
 | Get Config Auto Backup Setting | `GET /devices/{sn}/configbackups/setting` |
 | Update Config Auto Backup Setting | `PUT /devices/{sn}/configbackups/setting` |
+| Get FortiGate System Status | proxy `GET api/v2/monitor/system/status` |
+| List Firewall Addresses | proxy `GET api/v2/cmdb/firewall/address` |
+| List Firewall Policies | proxy `GET api/v2/cmdb/firewall/policy` |
+| Create Firewall Address | proxy `POST api/v2/cmdb/firewall/address` |
+| Delete Firewall Address | proxy `DELETE api/v2/cmdb/firewall/address/{name}` |
+| Block IP | create/reuse `FSR-BLOCK-<ip>` address + top-of-order deny policy |
+| Unblock IP | delete exactly the objects Block IP created |
 | Call FortiOS API | `{method} /fgt/{sn}/{FortiOS API path}` |
 | Generic API Call | any endpoint under the API base path |
 
@@ -86,13 +98,29 @@ misleading:
   that applies to every `client_id` on the account and clears only after 15-30
   minutes. The connector caches tokens per (api_id, client_id, host) to avoid
   re-authenticating on every operation.
+- Policy order changes go through the FortiOS CMDB move action:
+  `PUT api/v2/cmdb/firewall/policy/{id}?action=move&before={other id}`. There is
+  no "top" keyword, so moving a policy to the top means moving it before the
+  policy that currently sits there, then re-reading the list to verify it
+  actually landed first.
+- The Block IP / Unblock IP pair is idempotent and self-contained. It only ever
+  touches objects named `FSR-BLOCK-<ip>` (dots replaced with underscores, a
+  `-INBOUND`/`-OUTBOUND` suffix on policies); the deny policy matches only the
+  blocked address, so no other traffic path changes. Block IP refuses to reuse
+  an existing `FSR-BLOCK-<ip>` object whose subnet differs from the request,
+  and Unblock IP refuses to delete the address object while a policy it did
+  not create still references it.
 
 ## Tests
 
 ```bash
-pytest tests/test_fortigate_cloud.py -q          # unit; no network
-RUN_LIVE_TESTS=1 pytest tests/test_live_fortigate_cloud.py -v   # live, read-only
+pytest tests/ -q                                                 # unit; no network
+RUN_LIVE_TESTS=1 pytest tests/test_live_fortigate_cloud.py -v    # live
 ```
+
+Unit tests stub FortiSOAR's appliance-only runtime packages (see
+`tests/conftest.py`) and assert on the requests the connector builds; both test
+files share those fixtures.
 
 Live tests read credentials from a gitignored `.env` at the repo root:
 
@@ -103,12 +131,18 @@ FGC_REGION=Global
 FGC_TEST_SN=<serial number of a FortiGate in the account>
 ```
 
-The live tests are read-only: they never add a device, change management state,
-write a schedule, or alter a backup setting.
+Every live test is read-only except `test_live_block_unblock_ip_flow`, which
+runs the containment flow against the configured device: it blocks the
+documentation-only address 203.0.113.77 (the deny policy matches only that
+address), verifies the policy landed at the top of the policy order, and then
+removes everything it created. On a device without proxy write entitlement it
+skips with the vendor's `403 permission_deny` reason instead of failing, so the
+suite is safe against any account and lights up automatically once an entitled
+device is configured.
 
 ## Status
 
-- Unit tests: passing (40).
+- Unit tests: passing (64).
 - Live validation: **device API verified** against the real FortiGate Cloud API —
   health check, get devices (incl. pagination), get device, report schedules and
   the config auto backup setting all return live data.
@@ -126,6 +160,17 @@ write a schedule, or alter a backup setting.
 
   Offline or unentitled devices still cannot be used for this: see the two
   distinct gate errors under API quirks above.
+- Live validation: **curated proxy reads verified** through the new operations
+  against a connected FortiGate running FortiOS 7.4: Get FortiGate System
+  Status, List Firewall Addresses and List Firewall Policies all return live
+  device data, and the live block/unblock flow test confirms the write gate
+  (`403 permission_deny`) on an unentitled device by skipping cleanly.
+- Live write validation for **Block IP / Unblock IP is pending an entitled
+  device**: the account's previously paid FortiGate is no longer available (its
+  management contract lapsed), and the connected hardware unit answers proxy
+  reads normally but rejects writes with `403 permission_deny`. The flow is
+  fully covered by unit tests and runs automatically against the next
+  write-entitled device configured in `.env`.
 - Deployed and configured on FortiSOAR 8.0.0-6034; health check reports
   `Available`.
 

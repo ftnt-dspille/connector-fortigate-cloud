@@ -109,7 +109,15 @@ class MakeRestApiCall:
         self.headers = {"Authorization": "Bearer {0}".format(token)}
         self.authenticated = True
 
-    def make_request(self, endpoint="", params=None, method="GET", headers=None, json_data=None):
+    def make_request(self, endpoint="", params=None, method="GET", headers=None, json_data=None,
+                     ok_statuses=None):
+        """Issue one FortiGate Cloud API call.
+
+        ok_statuses: optional tuple of additional HTTP status codes to treat as
+        success (returning the parsed body) instead of raising ConnectorError.
+        Orchestration operations use this to probe for a resource with a clean
+        404 answer instead of parsing exception text.
+        """
         url = self.server_url + endpoint
         request_headers = {"Content-Type": "application/json"}
         request_headers.update(headers or self.headers)
@@ -123,7 +131,7 @@ class MakeRestApiCall:
                 verify=self.verify_ssl,
                 timeout=60,
             )
-            if response.ok:
+            if response.ok or (ok_statuses and response.status_code in ok_statuses):
                 if "json" in response.headers.get("Content-Type", ""):
                     return response.json()
                 return response.text
