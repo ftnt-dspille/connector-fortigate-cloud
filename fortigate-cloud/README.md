@@ -50,10 +50,38 @@ misleading:
   error.
 - The spec's curl examples use the legacy `www.forticloud.com` host; the regional
   hosts (`api|usapi|euapi|jpapi.fortigate.forticloud.com`) are current.
+- **One account can hold devices in more than one region, and `/devices` only
+  ever returns the region you asked.** A device missing from the Global listing
+  is not necessarily absent from the account — the same credentials against the
+  US host can return a device Global never mentions. When hunting for a serial,
+  sweep every region the credentials authenticate against rather than trusting a
+  single listing. Regions the account has no presence in answer `401
+  invalid_client`, which is indistinguishable from a bad credential, so a 401 on
+  one region says nothing about the others.
 - Observed token lifetime is 3660s, not the 14400s the documentation states.
 - `POST`, `PUT` and `DELETE` on the FortiOS proxy require a paid FortiGate; `GET`
   is available on free accounts. The proxy also requires the FortiGate to be
-  online with configuration management enabled and its management tunnel up.
+  online with its management tunnel up. The two gates are enforced at different
+  layers and produce different errors: an unentitled device rejects a write with
+  `403 {"error": "permission_deny"}` *before* the tunnel is consulted, while an
+  entitled but offline device returns the same `500 tunnel not connected` for
+  reads and writes alike. A `403` therefore means "wrong device", not "the proxy
+  is read-only".
+- `fos_api_path` must use the FortiOS CMDB path form, where the table family is
+  dot-separated and only the final segment is a path segment. Firewall services
+  are `api/v2/cmdb/firewall.service/custom`, **not**
+  `api/v2/cmdb/firewall/service/custom` — the latter returns a bare
+  `400 {"status": "error"}` with no `cli_error` to explain it, on reads as well
+  as writes. Addresses and policies (`firewall/address`, `firewall/policy`) are
+  already single-segment families and need no dot.
+- The proxy forwards the FortiGate's own error body, so payload mistakes surface
+  as FortiOS CLI errors rather than FortiGate Cloud errors. A create that names a
+  not-yet-existing object fails with
+  `cli_error: ["entry not found in datasource", ...]`, and an out-of-range
+  enum value fails with a bare `error: -61`. Both arrive as HTTP 500 with
+  `revision_changed: false`, which is the reliable signal that nothing was
+  written. On success the response carries `revision`, `old_revision` and
+  `revision_changed: true`.
 - Repeated failed password grants trigger a FortiCloud `invalid_grant` lockout
   that applies to every `client_id` on the account and clears only after 15-30
   minutes. The connector caches tokens per (api_id, client_id, host) to avoid
@@ -84,12 +112,20 @@ write a schedule, or alter a backup setting.
 - Live validation: **device API verified** against the real FortiGate Cloud API —
   health check, get devices (incl. pagination), get device, report schedules and
   the config auto backup setting all return live data.
-- Live validation: **FortiOS proxy unverified**. Every device in the test account
-  reports `management=false` / `tunnelAlive=false` / `initialized=false`, and the
-  proxy answers `HTTP 500 {"error_description": "tunnel not connected."}` for all
-  of them. The live test skips with that state in its reason. Validating it needs
-  a FortiGate actually deployed to FortiGate Cloud with configuration management
-  enabled and its management tunnel online.
+- Live validation: **FortiOS proxy verified**, against a paid FortiGate running
+  FortiOS 7.6.6 with `tunnelAlive: true` and `cloudAccessMode: INLINE`. The full
+  read/write lifecycle lands on the device: create a firewall address, create a
+  custom service, create a policy referencing both, read the policy back, disable
+  it with `PUT status=disable`, then delete all three. Every write returned
+  HTTP 200 with `revision_changed: true` and a new config revision, and the
+  read-backs confirmed the device state each time.
+
+  Note that `management: false` on the device record does **not** block the
+  proxy — the deciding fields are `tunnelAlive` and the paid entitlement, not the
+  configuration-management flag.
+
+  Offline or unentitled devices still cannot be used for this: see the two
+  distinct gate errors under API quirks above.
 - Deployed and configured on FortiSOAR 8.0.0-6034; health check reports
   `Available`.
 
