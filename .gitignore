@@ -17,3 +17,6 @@ __pycache__/
 
 # CI-only shim: underscore symlink so mypy can name the hyphenated package.
 /fortigate_cloud
+
+# Build output
+dist/
