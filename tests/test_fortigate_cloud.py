@@ -38,7 +38,8 @@ def calls(monkeypatch, rest_mod):
     def fake_post(url, **kw):
         recorded.append({'method': 'POST', 'url': url, **kw})
         return FakeResponse(payload={
-            'status': 'success', 'access_token': 'tok-123', 'expires_in': 3660,
+            'status': 'success', 'access_token': 'tok-123',
+            'refresh_token': 'refresh-tok-123', 'expires_in': 3660,
         })
 
     def fake_request(method=None, url=None, **kw):
@@ -96,6 +97,76 @@ def test_invalid_grant_raises_lockout_warning(ops, config, monkeypatch, rest_mod
         ops.operations['get_devices'](config, {})
 
 
+def _token_cache(ops):
+    """The token cache of the module instance whose code actually runs.
+
+    conftest reloads the connector modules per fixture, so rest_mod's module
+    object can differ from the one behind ops; the running code's globals are
+    the only reliable handle.
+    """
+    return ops.MakeRestApiCall._post_token.__globals__['_TOKEN_CACHE']
+
+
+def test_password_grant_stores_the_refresh_token(ops, config, calls, rest_mod):
+    ops.operations['get_devices'](config, {})
+    entry = next(iter(_token_cache(ops).values()))
+    assert entry['refresh_token'] == 'refresh-tok-123'
+
+
+def test_expired_token_renews_with_a_refresh_grant_without_the_password(ops, config, calls, rest_mod):
+    """The IAM endpoint issues a refresh_token with every grant; renewing with
+    it sends no account password, which keeps playbook runs away from the
+    invalid_grant lockout that repeated password grants can trigger."""
+    ops.operations['get_devices'](config, {})  # prime the cache with a grant
+    next(iter(_token_cache(ops).values()))['expires_at'] = 0  # force expiry
+    ops.operations['get_devices'](config, {})
+    grants = [c for c in calls if 'oauth' in c['url']]
+    assert len(grants) == 2
+    assert grants[1]['json'] == {
+        'client_id': 'fortigatecloud',
+        'grant_type': 'refresh_token',
+        'refresh_token': 'refresh-tok-123',
+    }
+
+
+def test_rejected_refresh_falls_back_to_a_password_grant(ops, config, calls, rest_mod, monkeypatch):
+    ops.operations['get_devices'](config, {})  # prime the cache with a grant
+    next(iter(_token_cache(ops).values()))['expires_at'] = 0
+
+    def fake_post(url, **kw):
+        calls.append({'method': 'POST', 'url': url, **kw})
+        if kw['json']['grant_type'] == 'refresh_token':
+            return FakeResponse(status=400, payload={'error': 'invalid_grant',
+                                                     'error_description': 'token expired'})
+        return FakeResponse(payload={'status': 'success', 'access_token': 'tok-2',
+                                     'refresh_token': 'refresh-tok-2', 'expires_in': 3660})
+
+    monkeypatch.setattr(rest_mod.requests, 'post', fake_post)
+    ops.operations['get_devices'](config, {})
+    grants = [c for c in calls if 'oauth' in c['url']]
+    assert grants[1]['json']['grant_type'] == 'refresh_token'
+    assert grants[2]['json']['grant_type'] == 'password'
+    entry = next(iter(_token_cache(ops).values()))
+    assert entry['access_token'] == 'tok-2'
+    assert entry['refresh_token'] == 'refresh-tok-2'
+
+
+def test_a_rejected_token_is_dropped_so_the_next_call_re_authenticates(
+    ops, config, calls, rest_mod, monkeypatch, connector_error
+):
+    ops.operations['get_devices'](config, {})  # prime the cache
+    assert _token_cache(ops)
+
+    def fake_request(method=None, url=None, **kw):
+        calls.append({'method': method, 'url': url, **kw})
+        return FakeResponse(status=401, payload={'error': 'invalid_client'})
+
+    monkeypatch.setattr(rest_mod.requests, 'request', fake_request)
+    with pytest.raises(connector_error):
+        ops.operations['get_devices'](config, {})
+    assert not _token_cache(ops), 'a rejected token must not survive in the cache'
+
+
 # --- base URL / region ----------------------------------------------------
 
 @pytest.mark.parametrize('region,host', [
@@ -126,6 +197,19 @@ def test_unknown_region_raises(ops, config, connector_error):
 
 
 def test_server_url_overrides_region(ops, config, calls):
+    config['server_url'] = 'https://custom.example.com'
+    ops.operations['get_devices'](config, {})
+    assert api_calls(calls)[0]['url'].startswith('https://custom.example.com/forticloudapi/v1')
+
+
+def test_custom_region_requires_server_url(ops, config, connector_error):
+    config['region'] = 'Custom'
+    with pytest.raises(connector_error, match='Server URL'):
+        ops.operations['get_devices'](config, {})
+
+
+def test_custom_region_uses_the_server_url(ops, config, calls):
+    config['region'] = 'Custom'
     config['server_url'] = 'https://custom.example.com'
     ops.operations['get_devices'](config, {})
     assert api_calls(calls)[0]['url'].startswith('https://custom.example.com/forticloudapi/v1')

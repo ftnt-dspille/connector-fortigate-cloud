@@ -33,12 +33,18 @@ class MakeRestApiCall:
             if not server_url.startswith(("http://", "https://")):
                 server_url = "https://{0}".format(server_url)
             base = server_url
+        elif region == "Custom":
+            raise ConnectorError(
+                "'Server URL' is required when 'Region' is Custom: enter the "
+                "FortiGate Cloud API host, for example "
+                "https://api.fortigate.forticloud.com"
+            )
         else:
             base = REGION_URLS.get(region)
             if not base:
                 raise ConnectorError(
                     "Unknown region '{0}'. Expected one of: {1}".format(
-                        region, ", ".join(REGION_URLS)
+                        region, ", ".join(list(REGION_URLS) + ["Custom"])
                     )
                 )
         self.server_url = base + API_BASE_PATH
@@ -53,20 +59,9 @@ class MakeRestApiCall:
     def _cache_key(self):
         return (self.api_id, self.client_id, self.server_url)
 
-    def login(self):
-        key = self._cache_key()
-        cached = _TOKEN_CACHE.get(key)
-        if cached and cached["expires_at"] - _TOKEN_EXPIRY_BUFFER > time.time():
-            self.headers = {"Authorization": "Bearer {0}".format(cached["access_token"])}
-            self.authenticated = True
-            return
-
-        data = {
-            "username": self.api_id,
-            "password": self.password,
-            "client_id": self.client_id,
-            "grant_type": "password",
-        }
+    def _post_token(self, data):
+        """POST one grant to the FortiCloud IAM token endpoint; return the
+        validated response body (access_token presence is verified here)."""
         try:
             response = requests.post(
                 TOKEN_URL,
@@ -98,15 +93,55 @@ class MakeRestApiCall:
                 )
             raise ConnectorError("Failed to acquire token: {0}".format(body))
 
-        token = body.get("access_token")
-        if not token:
-            raise ConnectorError("Token endpoint returned success without an access_token: {0}".format(body))
+        if not body.get("access_token"):
+            raise ConnectorError(
+                "Token endpoint returned success without an access_token: {0}".format(body)
+            )
+        return body
+
+    def login(self):
+        key = self._cache_key()
+        cached = _TOKEN_CACHE.get(key)
+        if cached and cached["expires_at"] - _TOKEN_EXPIRY_BUFFER > time.time():
+            self.headers = {"Authorization": "Bearer {0}".format(cached["access_token"])}
+            self.authenticated = True
+            return
+
+        # The IAM endpoint issues a refresh_token alongside every grant. A
+        # refresh grant carries no account password, so renewing with it avoids
+        # the invalid_grant lockout that repeated password grants can trigger.
+        # A failed refresh (expired or revoked) falls back to the password
+        # grant, which remains the only path on the first login of a process.
+        refresh_token = (cached or {}).get("refresh_token")
+        body = None
+        if refresh_token:
+            try:
+                body = self._post_token({
+                    "client_id": self.client_id,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                })
+            except ConnectorError as err:
+                logger.warning(
+                    "The refresh_token grant was rejected ({0}); falling back to "
+                    "a password grant".format(str(err)[:160])
+                )
+        if body is None:
+            body = self._post_token({
+                "username": self.api_id,
+                "password": self.password,
+                "client_id": self.client_id,
+                "grant_type": "password",
+            })
 
         _TOKEN_CACHE[key] = {
-            "access_token": token,
+            "access_token": body["access_token"],
+            # A refresh response may rotate the refresh token; keep the old one
+            # as a fallback when it does not.
+            "refresh_token": body.get("refresh_token") or refresh_token,
             "expires_at": time.time() + body.get("expires_in", 3600),
         }
-        self.headers = {"Authorization": "Bearer {0}".format(token)}
+        self.headers = {"Authorization": "Bearer {0}".format(body["access_token"])}
         self.authenticated = True
 
     def make_request(self, endpoint="", params=None, method="GET", headers=None, json_data=None,
@@ -152,6 +187,12 @@ class MakeRestApiCall:
             except ValueError:
                 detail = response.text
             logger.error("Error: %s", detail)
+            if response.status_code == 401:
+                # The cached token was rejected (revoked or rotated out from
+                # under this process); drop it so the next call re-authenticates
+                # instead of retrying the same dead token for the rest of the
+                # process lifetime.
+                _TOKEN_CACHE.pop(self._cache_key(), None)
             raise ConnectorError(
                 "{0}. Details: {1}".format(
                     ERROR_MESSAGES.get(response.status_code, "HTTP {0}".format(response.status_code)),

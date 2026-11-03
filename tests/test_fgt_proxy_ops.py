@@ -51,7 +51,8 @@ def router(monkeypatch, rest_mod):
     def fake_post(url, **kw):
         recorded.append({'method': 'POST', 'url': url, **kw})
         return FakeResponse(payload={
-            'status': 'success', 'access_token': 'tok-123', 'expires_in': 3660,
+            'status': 'success', 'access_token': 'tok-123',
+            'refresh_token': 'refresh-tok-123', 'expires_in': 3660,
         })
 
     def fake_request(method=None, url=None, **kw):

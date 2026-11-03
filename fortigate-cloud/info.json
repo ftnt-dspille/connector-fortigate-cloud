@@ -1,7 +1,7 @@
 {
   "name": "fortigate-cloud",
   "label": "FortiGate Cloud",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "FortiGate Cloud is a cloud-based management platform for FortiGate devices. This connector facilitates automated operations to retrieve and add devices provisioned to FortiGate Cloud, manage their configuration backup and report schedules, proxy FortiOS API calls to a managed FortiGate through FortiGate Cloud, and run curated FortiOS proxy operations on a managed FortiGate, including blocking and unblocking IP addresses.",
   "publisher": "Fortinet CSE",
   "cs_approved": false,
@@ -19,14 +19,15 @@
         "editable": true,
         "visible": true,
         "required": true,
-        "description": "Select the FortiGate Cloud region that hosts your account. A device is only visible from the region it was provisioned into.",
-        "tooltip": "Select the FortiGate Cloud region that hosts your account. A device is only visible from the region it was provisioned into.",
+        "description": "Select the FortiGate Cloud region that hosts your account. A device is only visible from the region it was provisioned into. Choose Custom to point the connector at a specific FortiGate Cloud API host with the Server URL field.",
+        "tooltip": "Select the FortiGate Cloud region that hosts your account. A device is only visible from the region it was provisioned into. Choose Custom to point the connector at a specific FortiGate Cloud API host with the Server URL field.",
         "value": "Global",
         "options": [
           "Global",
           "US",
           "EU",
-          "Japan"
+          "Japan",
+          "Custom"
         ]
       },
       {
@@ -36,8 +37,8 @@
         "editable": true,
         "visible": true,
         "required": false,
-        "description": "Optionally specify the FortiGate Cloud API URL to override the selected region, for example https://api.fortigate.forticloud.com. Leave blank to use the region.",
-        "tooltip": "Optionally specify the FortiGate Cloud API URL to override the selected region, for example https://api.fortigate.forticloud.com. Leave blank to use the region."
+        "description": "Required when Region is Custom; otherwise leave blank to use the selected region, for example https://api.fortigate.forticloud.com",
+        "tooltip": "Required when Region is Custom; otherwise leave blank to use the selected region, for example https://api.fortigate.forticloud.com"
       },
       {
         "name": "api_id",

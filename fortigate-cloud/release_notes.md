@@ -1,3 +1,33 @@
+#### 1.3.0
+
+##### What's Changed
+
+- **Region selection with a Custom override**: the configuration's Region is a
+  select of the documented FortiGate Cloud endpoints — Global (default), US, EU
+  and Japan — plus a Custom entry that requires the Server URL field, for
+  accounts or environments reached through a host that is not one of the four
+  published regions.
+- **Token renewal via refresh_token**: the FortiCloud IAM endpoint issues a
+  refresh token alongside every grant. The connector now renews an expired
+  access token with a refresh grant — which carries no account password — and
+  only falls back to a password grant when the refresh token is rejected. This
+  keeps long playbook runs away from the invalid_grant lockout that repeated
+  password grants can trigger.
+- **A rejected token is dropped from the cache**: when FortiGate Cloud answers
+  401 for a cached token, the connector discards it so the next operation
+  re-authenticates instead of retrying the same dead token.
+
+##### Notes
+
+- Verified against the vendor's device and FortiOS-proxy API specifications:
+  all ten documented device calls (devices, report schedules, config backup
+  settings, management toggle) and the four FortiOS-proxy verbs are available
+  as operations, and the base URL, auth grant and bearer-header shapes match
+  the specification.
+- FortiOS proxy operations require the device to be provisioned to FortiGate
+  Cloud with management enabled and the management tunnel online; the
+  Update Device Management operation toggles management on the device.
+
 #### 1.2.0
 
 ##### What's Added
