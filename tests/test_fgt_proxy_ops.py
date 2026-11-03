@@ -200,9 +200,29 @@ def test_make_request_unexpected_404_still_raises(ops, config, connector_error, 
 # --- block_ip -------------------------------------------------------------
 
 
+def _shorten_retries(monkeypatch, ops):
+    """Keep retry-loop tests fast: two verify attempts, no sleep.
+
+    Patch the globals dict of the executing function itself: several fixtures
+    reload the connector modules, so the object under sys.modules is not
+    guaranteed to be the one whose code runs.
+    """
+    g = ops.operations['block_ip'].__globals__
+    monkeypatch.setitem(g, '_LIST_RETRY_ATTEMPTS', 2)
+    monkeypatch.setitem(g, '_LIST_RETRY_DELAY', 0.0)
+
+
+def _created_list(existing, addr_name, suffix):
+    """A policy list in which the just-created deny policy exists but still
+    sits at the bottom — the stale-ordered view the proxy can serve."""
+    return {'results': list(existing) + [policy(99, addr_name + '-' + suffix)],
+            'matched_count': len(existing) + 1}
+
+
 def test_block_ip_fresh_inbound_flow(ops, config, router):
     addr_name = 'FSR-BLOCK-203_0_113_77'
     initial = {'results': [policy(1, 'Home-to-Internet')], 'matched_count': 1}
+    created = _created_list([policy(1, 'Home-to-Internet')], addr_name, 'INBOUND')
     moved = {'results': [policy(99, addr_name + '-INBOUND'), policy(1, 'Home-to-Internet')],
              'matched_count': 2}
     router.add('GET', '/address/' + addr_name, FakeResponse(status=404, payload=NOT_FOUND))
@@ -210,9 +230,10 @@ def test_block_ip_fresh_inbound_flow(ops, config, router):
     router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=initial))
     router.add('POST', '/cmdb/firewall/policy',
                FakeResponse(payload={'results': {'policyid': 99}, 'revision_changed': True}))
-    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=initial))
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=created))
     router.add('PUT', '/cmdb/firewall/policy/99', FakeResponse(payload={'revision_changed': True}))
-    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=moved))
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=moved),
+               FakeResponse(payload=moved))
 
     result = ops.operations['block_ip'](config, {'sn': SN, 'ip': '203.0.113.77', 'direction': 'inbound'})
 
@@ -241,6 +262,10 @@ def test_block_ip_reuses_existing_address_and_policy(ops, config, router):
     addr_name = 'FSR-BLOCK-203_0_113_77'
     router.add('GET', '/address/' + addr_name,
                FakeResponse(payload={'results': {'subnet': '203.0.113.77 255.255.255.255'}}))
+    # Routes match by substring, so the by-id route must be registered before
+    # the list route or the list answers for the direct read too.
+    router.add('GET', '/cmdb/firewall/policy/5',
+               FakeResponse(payload={'results': policy(5, addr_name + '-INBOUND')}))
     router.add('GET', '/cmdb/firewall/policy',
                FakeResponse(payload={'results': [policy(5, addr_name + '-INBOUND')],
                                      'matched_count': 1}))
@@ -250,6 +275,64 @@ def test_block_ip_reuses_existing_address_and_policy(ops, config, router):
     assert result['policies'] == [{'name': addr_name + '-INBOUND', 'policyid': 5, 'created': False}]
     # No POST and no move happened.
     assert not [c for c in api_calls(router) if c['method'] == 'POST']
+    assert [c for c in api_calls(router) if c['url'].endswith('/policy/5')]
+
+
+def test_block_ip_creates_fresh_when_the_list_shows_a_deleted_policy(ops, config, router):
+    """The proxy's list reads can serve a cached view that still contains a
+    policy deleted earlier. Reusing it would report a block that is not in
+    effect, so block_ip verifies the listed policy and creates a new one."""
+    addr_name = 'FSR-BLOCK-203_0_113_77'
+    ghost_list = {'results': [policy(5, addr_name + '-INBOUND')], 'matched_count': 1}
+    created = _created_list([policy(1, 'Home-to-Internet')], addr_name, 'INBOUND')
+    moved = {'results': [policy(99, addr_name + '-INBOUND'), policy(1, 'Home-to-Internet')],
+             'matched_count': 2}
+    router.add('GET', '/address/' + addr_name, FakeResponse(status=404, payload=NOT_FOUND))
+    router.add('POST', '/cmdb/firewall/address', FakeResponse(payload={}))
+    # The by-id route must be registered before the list route: routes match
+    # by substring, so '/cmdb/firewall/policy' also matches '/policy/5'.
+    router.add('GET', '/cmdb/firewall/policy/5', FakeResponse(status=404, payload=NOT_FOUND))
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=ghost_list),
+               FakeResponse(payload=created), FakeResponse(payload=moved),
+               FakeResponse(payload=moved))
+    router.add('POST', '/cmdb/firewall/policy', FakeResponse(payload={'results': {'policyid': 99}}))
+    router.add('PUT', '/cmdb/firewall/policy/99', FakeResponse(payload={}))
+
+    result = ops.operations['block_ip'](config, {'sn': SN, 'ip': '203.0.113.77',
+                                                 'direction': 'inbound'})
+    assert result['policies'] == [{'name': addr_name + '-INBOUND', 'policyid': 99,
+                                   'created': True, 'moved_to_top': True, 'position': 0}]
+
+
+def test_unblock_ip_treats_stale_list_ghost_policies_as_absent(ops, config, router):
+    ghost = {'results': [policy(5, 'FSR-BLOCK-203_0_113_77-INBOUND')], 'matched_count': 1}
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=ghost))
+    router.add('DELETE', '/cmdb/firewall/policy/5', FakeResponse(status=404, payload=NOT_FOUND))
+    router.add('GET', '/address/FSR-BLOCK-203_0_113_77', FakeResponse(status=404, payload=NOT_FOUND))
+
+    result = ops.operations['unblock_ip'](config, {'sn': SN, 'ip': '203.0.113.77'})
+    assert result['removed_policies'] == [
+        {'name': 'FSR-BLOCK-203_0_113_77-INBOUND', 'policyid': 5, 'already_absent': True}]
+    assert result['address_removed'] is False
+    assert result['address_retained_reason'] is None
+
+
+def test_unblock_ip_survives_a_stale_address_view(ops, config, router):
+    """The exists-check can read a stale view that still shows an address that
+    was already deleted; the delete then 404s and unblock_ip stays idempotent."""
+    router.add('GET', '/cmdb/firewall/policy',
+               FakeResponse(payload={'results': [], 'matched_count': 0}))
+    router.add('GET', '/address/FSR-BLOCK-203_0_113_77',
+               FakeResponse(payload={'results': {'subnet': '203.0.113.77 255.255.255.255'}}))
+    router.add('GET', '/cmdb/firewall/policy',
+               FakeResponse(payload={'results': [], 'matched_count': 0}))
+    router.add('DELETE', '/address/FSR-BLOCK-203_0_113_77',
+               FakeResponse(status=404, payload=NOT_FOUND))
+
+    result = ops.operations['unblock_ip'](config, {'sn': SN, 'ip': '203.0.113.77'})
+    assert result['removed_policies'] == []
+    assert result['address_removed'] is False
+    assert result['address_retained_reason'] is None
 
 
 def test_block_ip_rejects_bad_direction(ops, config, connector_error):
@@ -271,17 +354,21 @@ def test_block_ip_rejects_existing_name_other_subnet(ops, config, connector_erro
     assert 'already exists' in str(err.value)
 
 
-def test_block_ip_move_failure_raises_with_state(ops, config, connector_error, router):
+def test_block_ip_move_failure_raises_with_state(ops, config, connector_error, router,
+                                                 monkeypatch):
     addr_name = 'FSR-BLOCK-203_0_113_77'
     initial = {'results': [policy(1, 'Home-to-Internet')], 'matched_count': 1}
+    created = _created_list([policy(1, 'Home-to-Internet')], addr_name, 'INBOUND')
+    _shorten_retries(monkeypatch, ops)
     router.add('GET', '/address/' + addr_name, FakeResponse(status=404, payload=NOT_FOUND))
     router.add('POST', '/cmdb/firewall/address', FakeResponse(payload={}))
     router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=initial))
     router.add('POST', '/cmdb/firewall/policy',
                FakeResponse(payload={'results': {'policyid': 99}}))
-    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=initial))
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=created))
     router.add('PUT', '/cmdb/firewall/policy/99', FakeResponse(payload={}))
-    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=initial))  # move did not stick
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=created),
+               FakeResponse(payload=created))  # move did not stick
     with pytest.raises(connector_error) as err:
         ops.operations['block_ip'](config, {'sn': SN, 'ip': '203.0.113.77'})
     assert 'unblock_ip' in str(err.value)
@@ -297,11 +384,15 @@ def test_block_ip_both_directions_moves_each_to_top(ops, config, router):
     router.add('GET', '/address/' + addr_name, FakeResponse(status=404, payload=NOT_FOUND))
     router.add('POST', '/cmdb/firewall/address', FakeResponse(payload={}))
     # GET policy sequence: pre-loop, move-read IN, verify IN, refresh, move-read OUT,
-    # verify OUT, refresh.
+    # verify OUT, refresh. Each move-read already shows the policy created in that
+    # step (the connector polls until the proxy's read-after-write view catches up).
+    created_in = _created_list([policy(1, 'Home-to-Internet')], addr_name, 'INBOUND')
+    created_out = {'results': [policy(99, addr_name + '-INBOUND'), policy(1, 'Home-to-Internet'),
+                               policy(100, addr_name + '-OUTBOUND')], 'matched_count': 3}
     router.add('GET', '/cmdb/firewall/policy',
-               FakeResponse(payload=initial), FakeResponse(payload=initial),
+               FakeResponse(payload=initial), FakeResponse(payload=created_in),
                FakeResponse(payload=after_in), FakeResponse(payload=after_in),
-               FakeResponse(payload=after_in), FakeResponse(payload=after_out),
+               FakeResponse(payload=created_out), FakeResponse(payload=after_out),
                FakeResponse(payload=after_out))
     router.add('POST', '/cmdb/firewall/policy', FakeResponse(payload={'results': {'policyid': 99}}),
                FakeResponse(payload={'results': {'policyid': 100}}))
@@ -322,15 +413,17 @@ def test_block_ip_both_directions_moves_each_to_top(ops, config, router):
 def test_block_ip_custom_interfaces_reach_the_policy_body(ops, config, router):
     addr_name = 'FSR-BLOCK-203_0_113_77'
     initial = {'results': [policy(1, 'Home-to-Internet')], 'matched_count': 1}
+    created = _created_list([policy(1, 'Home-to-Internet')], addr_name, 'INBOUND')
     moved = {'results': [policy(99, addr_name + '-INBOUND'), policy(1, 'Home-to-Internet')],
              'matched_count': 2}
     router.add('GET', '/address/' + addr_name, FakeResponse(status=404, payload=NOT_FOUND))
     router.add('POST', '/cmdb/firewall/address', FakeResponse(payload={}))
     router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=initial))
     router.add('POST', '/cmdb/firewall/policy', FakeResponse(payload={'results': {'policyid': 99}}))
-    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=initial))
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=created))
     router.add('PUT', '/cmdb/firewall/policy/99', FakeResponse(payload={}))
-    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=moved))
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=moved),
+               FakeResponse(payload=moved))
     ops.operations['block_ip'](config, {'sn': SN, 'ip': '203.0.113.77',
                                         'direction': 'inbound', 'srcintf': 'wan1, lan'})
     create_pol = [c for c in api_calls(router) if c['method'] == 'POST'

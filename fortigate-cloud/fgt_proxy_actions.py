@@ -23,6 +23,7 @@
 
 import ipaddress
 import json
+import time
 from urllib.parse import quote
 
 from connectors.core.connector import ConnectorError
@@ -214,6 +215,68 @@ def _find_policy(policies, name):
     return None
 
 
+def _position_of(policies, policy_id):
+    return next(
+        (index for index, p in enumerate(policies) if p.get("policyid") == policy_id),
+        None,
+    )
+
+
+# The FortiGate Cloud proxy caches CMDB reads per request identity and can
+# serve a view that is minutes old — including one that still shows a policy
+# deleted earlier — and it keeps doing so even while the device is unreachable.
+# Anything that must reflect the device's real state verifies with a direct
+# read of the object itself (a different, uncached request) instead of
+# trusting a list.
+_NOT_FOUND_MARKERS = ("not_found", "not found")
+
+
+def _is_not_found(err):
+    text = str(err).lower()
+    return any(marker in text for marker in _NOT_FOUND_MARKERS)
+
+
+def _policy_exists(fgc, sn, policy_id):
+    """Direct GET of one policy by id, to confirm a list entry is real."""
+    if policy_id is None:
+        return False
+    try:
+        fgc.make_request(
+            endpoint=_proxy_path(
+                sn, "api/v2/cmdb/firewall/policy/{0}".format(quote(str(policy_id), safe=""))
+            ),
+            method="GET",
+        )
+    except ConnectorError as err:
+        if _is_not_found(err):
+            return False
+        raise
+    return True
+
+
+# FortiGate Cloud's proxy can serve policy reads that lag a write by a few
+# seconds: a list taken right after a create may omit the new policy, and one
+# taken right after a move may still show the old order. Verification that
+# must observe a specific state polls instead of trusting the first read.
+_LIST_RETRY_ATTEMPTS = 5
+_LIST_RETRY_DELAY = 2.0
+
+
+def _list_policies_waiting(fgc, sn, want_name=None, attempts=None, delay=None):
+    """List policies, retrying while the proxy's read-after-write view lags.
+    With want_name set, retries until that policy appears in the list (or the
+    attempts run out). In the common fresh-read case this is a single call."""
+    attempts = _LIST_RETRY_ATTEMPTS if attempts is None else attempts
+    delay = _LIST_RETRY_DELAY if delay is None else delay
+    policies = _list_policies(fgc, sn)
+    for _ in range(attempts - 1):
+        if want_name is None or _find_policy(policies, want_name) is not None:
+            return policies
+        time.sleep(delay)
+        policies = _list_policies(fgc, sn)
+    return policies
+
+
 def _list_policies(fgc, sn, limit=1000):
     body = fgc.make_request(
         endpoint=_proxy_path(sn, "api/v2/cmdb/firewall/policy"),
@@ -281,14 +344,13 @@ def _deny_policy_body(name, address_name, direction, srcintf, dstintf, comment):
     return body
 
 
-def _move_to_top(fgc, sn, policy_id):
+def _move_to_top(fgc, sn, policy_id, policy_name):
     """Move a policy above the current top policy so the deny is evaluated
-    before any broad accept policy. Uses the FortiOS CMDB move action."""
-    policies = _list_policies(fgc, sn)
-    position = next(
-        (index for index, p in enumerate(policies) if p.get("policyid") == policy_id),
-        None,
-    )
+    before any broad accept policy. Uses the FortiOS CMDB move action, then
+    verifies with re-lists (the proxy's reads can lag the move) before
+    declaring failure."""
+    policies = _list_policies_waiting(fgc, sn, want_name=policy_name)
+    position = _position_of(policies, policy_id)
     if position == 0:
         return {"moved": False, "position": 0, "top_policy_id": policy_id}
     top_id = policies[0].get("policyid") if policies else None
@@ -300,19 +362,19 @@ def _move_to_top(fgc, sn, policy_id):
             method="PUT",
             params={"action": "move", "before": top_id},
         )
-    policies = _list_policies(fgc, sn)
-    position = next(
-        (index for index, p in enumerate(policies) if p.get("policyid") == policy_id),
-        None,
+    for attempt in range(_LIST_RETRY_ATTEMPTS):
+        policies = _list_policies_waiting(fgc, sn, want_name=policy_name)
+        position = _position_of(policies, policy_id)
+        if position == 0:
+            return {"moved": True, "position": 0, "top_policy_id": top_id}
+        if attempt < _LIST_RETRY_ATTEMPTS - 1:
+            time.sleep(_LIST_RETRY_DELAY)
+    raise ConnectorError(
+        "The deny policy {0} was created but could not be moved to the top of "
+        "the policy order; it currently sits at position {1}. It may not take "
+        "effect above existing accept policies. Remove it with unblock_ip and "
+        "retry, or move it manually.".format(policy_id, position)
     )
-    if position != 0:
-        raise ConnectorError(
-            "The deny policy {0} was created but could not be moved to the top of "
-            "the policy order; it currently sits at position {1}. It may not take "
-            "effect above existing accept policies. Remove it with unblock_ip and "
-            "retry, or move it manually.".format(policy_id, position)
-        )
-    return {"moved": True, "position": 0, "top_policy_id": top_id}
 
 
 def block_ip(config: dict, params: dict) -> dict:
@@ -343,7 +405,7 @@ def block_ip(config: dict, params: dict) -> dict:
     for item in sorted(directions):  # deterministic order: inbound, then outbound
         policy_name = "{0}-{1}".format(name, item.upper())
         existing = _find_policy(policies, policy_name)
-        if existing is not None:
+        if existing is not None and _policy_exists(fgc, sn, existing.get("policyid")):
             results.append({
                 "name": policy_name,
                 "policyid": existing.get("policyid"),
@@ -368,7 +430,7 @@ def block_ip(config: dict, params: dict) -> dict:
                 "return its policy id, so it cannot be moved or verified. Remove "
                 "it with unblock_ip and retry.".format(policy_name)
             )
-        move = _move_to_top(fgc, sn, created_policy)
+        move = _move_to_top(fgc, sn, created_policy, policy_name)
         policies = _list_policies(fgc, sn)  # refresh order for the next direction
         results.append({
             "name": policy_name,
@@ -401,16 +463,24 @@ def unblock_ip(config: dict, params: dict) -> dict:
     for policy in policies:
         policy_name = policy.get("name") or ""
         if policy_name == name or policy_name.startswith(name + "-"):
-            fgc.make_request(
-                endpoint=_proxy_path(
-                    sn,
-                    "api/v2/cmdb/firewall/policy/{0}".format(
-                        quote(str(policy.get("policyid")), safe="")
+            try:
+                fgc.make_request(
+                    endpoint=_proxy_path(
+                        sn,
+                        "api/v2/cmdb/firewall/policy/{0}".format(
+                            quote(str(policy.get("policyid")), safe="")
+                        ),
                     ),
-                ),
-                method="DELETE",
-            )
-            removed.append({"name": policy_name, "policyid": policy.get("policyid")})
+                    method="DELETE",
+                )
+                removed.append({"name": policy_name, "policyid": policy.get("policyid")})
+            except ConnectorError as err:
+                if not _is_not_found(err):
+                    raise
+                # A stale proxy list can still show a policy deleted earlier;
+                # the goal (the policy is gone) already holds.
+                removed.append({"name": policy_name, "policyid": policy.get("policyid"),
+                                "already_absent": True})
 
     address_removed = False
     retained_reason = None
@@ -431,13 +501,19 @@ def unblock_ip(config: dict, params: dict) -> dict:
                 "references first.".format(", ".join(foreign_refs))
             )
         else:
-            fgc.make_request(
-                endpoint=_proxy_path(
-                    sn, "api/v2/cmdb/firewall/address/{0}".format(quote(name, safe=""))
-                ),
-                method="DELETE",
-            )
-            address_removed = True
+            try:
+                fgc.make_request(
+                    endpoint=_proxy_path(
+                        sn, "api/v2/cmdb/firewall/address/{0}".format(quote(name, safe=""))
+                    ),
+                    method="DELETE",
+                )
+                address_removed = True
+            except ConnectorError as err:
+                if not _is_not_found(err):
+                    raise
+                # The address was already gone (the exists-check read a stale
+                # proxy view); cleanup is idempotent, so that is success.
 
     return {
         "device": sn,

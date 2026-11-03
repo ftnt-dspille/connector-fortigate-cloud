@@ -210,21 +210,33 @@ def test_live_block_unblock_ip_flow(ops, live_config, connector_error):
             )
         raise
     try:
+        def top_names():
+            return [p.get('name') for p in
+                    ops.operations['list_firewall_policies'](live_config,
+                                                             {'sn': TEST_SN, 'limit': 10}
+                                                             ).get('results') or []]
         assert result['address']['name'] == 'FSR-BLOCK-203_0_113_77'
         assert result['policies'][0]['created'] is True
-        policies = ops.operations['list_firewall_policies'](live_config,
-                                                             {'sn': TEST_SN, 'limit': 10})
-        names = [p.get('name') for p in policies.get('results') or []]
-        assert names and names[0] == 'FSR-BLOCK-203_0_113_77-INBOUND', \
-            'the deny policy should sit at the top of the policy order'
+        # The proxy's policy reads can lag the write; poll until the policy
+        # appears at the top of the order instead of trusting the first read.
+        ok = False
+        for _ in range(6):
+            names = top_names()
+            if names and names[0] == 'FSR-BLOCK-203_0_113_77-INBOUND':
+                ok = True
+                break
+            time.sleep(5)
+        assert ok, 'the deny policy should sit at the top of the policy order'
     finally:
         removed = ops.operations['unblock_ip'](live_config, {'sn': TEST_SN,
                                                              'ip': '203.0.113.77'})
     assert removed['removed_policies'], 'expected the deny policy to be removed'
     assert removed['address_removed'] is True
-    policies = ops.operations['list_firewall_policies'](live_config,
-                                                        {'sn': TEST_SN, 'limit': 10})
-    names = [p.get('name') for p in policies.get('results') or []]
+    for _ in range(6):
+        if 'FSR-BLOCK-203_0_113_77-INBOUND' not in top_names():
+            break
+        time.sleep(5)
+    names = top_names()
     assert 'FSR-BLOCK-203_0_113_77-INBOUND' not in names
 
 
