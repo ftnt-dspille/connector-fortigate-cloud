@@ -1,3 +1,34 @@
+#### 1.2.0
+
+##### What's Added
+
+A second containment style alongside the policy flow: the FortiOS **Quarantine
+Monitor** (runtime IP bans), exposed through FortiGate Cloud as three curated
+operations:
+
+- **Quarantine IP**: bans one or more IPv4 addresses in a single call. Each
+  ban carries its own expiry (`1 Hour` … `1 Month`, a custom duration in
+  seconds, or `Never`), touches no address objects or policies, and reverts on
+  its own when it expires. Idempotent: already-banned addresses are reported,
+  not re-banned.
+- **Unquarantine IP**: releases bans; addresses that are not banned are
+  reported as such instead of erroring.
+- **List Banned IPs**: the current Quarantine Monitor entries, passed through
+  verbatim (`ip_address`, `expiry`, `created`, `cause`).
+
+Unlike Block IP / Unblock IP, a Quarantine IP that a playbook fails to clean
+up cannot leave the device blocked permanently — the ban expires (and, unless
+the device's banned-IP persistency is enabled, does not survive a reboot).
+
+##### Notes
+
+- The ban request is sent JSON-encoded with a form-urlencoded Content-Type —
+  the wire shape proven live by the FortiGate v2 connector; the proxy's pass
+  through of that shape is exercised by the live quarantine tests.
+- The Quarantine Monitor maps to the FortiOS REST endpoints
+  `monitor/user/banned/add_users`, `/select` and `/clear_users` (CLI:
+  `diagnose user banned-ip`).
+
 #### 1.1.0
 
 ##### What's Added

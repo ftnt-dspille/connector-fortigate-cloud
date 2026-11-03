@@ -1,7 +1,7 @@
 {
   "name": "fortigate-cloud",
   "label": "FortiGate Cloud",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "FortiGate Cloud is a cloud-based management platform for FortiGate devices. This connector facilitates automated operations to retrieve and add devices provisioned to FortiGate Cloud, manage their configuration backup and report schedules, proxy FortiOS API calls to a managed FortiGate through FortiGate Cloud, and run curated FortiOS proxy operations on a managed FortiGate, including blocking and unblocking IP addresses.",
   "publisher": "Fortinet CSE",
   "cs_approved": false,
@@ -962,6 +962,162 @@
           "required": true,
           "description": "IPv4 address or CIDR network to unblock, matching the value passed to Block IP.",
           "tooltip": "IPv4 address or CIDR network to unblock, matching the value passed to Block IP."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "quarantine_ip",
+      "title": "Quarantine IP",
+      "annotation": "quarantine_ip",
+      "description": "Quarantines (bans) one or more IPv4 addresses on a FortiGate managed by FortiGate Cloud using the FortiOS Quarantine Monitor: a runtime ban that touches no address objects or policies and carries its own expiry, so it reverts on its own when the duration passes. Idempotent: already-banned addresses are reported, not re-banned. Writes through the FortiOS proxy require a paid FortiGate; an unentitled device answers 403 permission_deny.",
+      "category": "containment",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "ips",
+          "title": "IP Addresses",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "One or more IPv4 addresses, comma-separated, for example 203.0.113.10, 198.51.100.4.",
+          "tooltip": "One or more IPv4 addresses, comma-separated, for example 203.0.113.10, 198.51.100.4."
+        },
+        {
+          "name": "time_to_live",
+          "title": "Time To Live",
+          "type": "select",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "How long the ban stays in effect. Choose Custom Time to pass an exact duration in seconds with the Duration parameter.",
+          "tooltip": "How long the ban stays in effect. Choose Custom Time to pass an exact duration in seconds with the Duration parameter.",
+          "value": "1 Hour",
+          "options": [
+            "1 Hour",
+            "6 Hours",
+            "12 Hours",
+            "1 Day",
+            "1 Week",
+            "1 Month",
+            "Custom Time",
+            "Never"
+          ]
+        },
+        {
+          "name": "duration",
+          "title": "Duration (seconds)",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Ban duration in seconds when Time To Live is Custom Time. 0 means the ban never expires.",
+          "tooltip": "Ban duration in seconds when Time To Live is Custom Time. 0 means the ban never expires."
+        },
+        {
+          "name": "vdom",
+          "title": "VDOM",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "FortiOS VDOM that owns the Quarantine Monitor list. Defaults to root.",
+          "tooltip": "FortiOS VDOM that owns the Quarantine Monitor list. Defaults to root.",
+          "value": "root"
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "unquarantine_ip",
+      "title": "Unquarantine IP",
+      "annotation": "unquarantine_ip",
+      "description": "Releases Quarantine Monitor bans previously created by Quarantine IP (or the FortiGate CLI's diagnose user banned-ip add). Idempotent: addresses that are not currently banned are reported as such instead of erroring. Writes through the FortiOS proxy require a paid FortiGate; an unentitled device answers 403 permission_deny.",
+      "category": "containment",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "ips",
+          "title": "IP Addresses",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "One or more IPv4 addresses, comma-separated, for example 203.0.113.10, 198.51.100.4.",
+          "tooltip": "One or more IPv4 addresses, comma-separated, for example 203.0.113.10, 198.51.100.4."
+        },
+        {
+          "name": "vdom",
+          "title": "VDOM",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "FortiOS VDOM that owns the Quarantine Monitor list. Defaults to root.",
+          "tooltip": "FortiOS VDOM that owns the Quarantine Monitor list. Defaults to root.",
+          "value": "root"
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "list_banned_ips",
+      "title": "List Banned IPs",
+      "annotation": "list_banned_ips",
+      "description": "Lists the FortiOS Quarantine Monitor's current IP bans on a FortiGate managed by FortiGate Cloud. Each entry carries the vendor fields (ip_address, expiry, created, cause) verbatim. Requires the device's management tunnel to be up.",
+      "category": "containment",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "sn",
+          "title": "Serial Number",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "tooltip": "Specify the serial number of the FortiGate provisioned to FortiGate Cloud.",
+          "placeholder": "For example: FGT60D4615007890"
+        },
+        {
+          "name": "vdom",
+          "title": "VDOM",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "FortiOS VDOM that owns the Quarantine Monitor list. Defaults to root.",
+          "tooltip": "FortiOS VDOM that owns the Quarantine Monitor list. Defaults to root.",
+          "value": "root"
         }
       ],
       "output_schema": {}

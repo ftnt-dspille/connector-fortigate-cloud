@@ -24,9 +24,12 @@ from .fgt_proxy_actions import (
     create_firewall_address,
     delete_firewall_address,
     get_fgt_system_status,
+    list_banned_ips,
     list_firewall_addresses,
     list_firewall_policies,
+    quarantine_ip,
     unblock_ip,
+    unquarantine_ip,
 )
 from .fos_actions import fos_api_call
 from .generic_api_call import generic_api_call
@@ -71,4 +74,7 @@ operations = {
     "delete_firewall_address": delete_firewall_address,
     "block_ip": block_ip,
     "unblock_ip": unblock_ip,
+    "quarantine_ip": quarantine_ip,
+    "unquarantine_ip": unquarantine_ip,
+    "list_banned_ips": list_banned_ips,
 }

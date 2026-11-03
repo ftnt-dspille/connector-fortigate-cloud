@@ -22,6 +22,7 @@
 # still references it.
 
 import ipaddress
+import json
 from urllib.parse import quote
 
 from connectors.core.connector import ConnectorError
@@ -30,6 +31,22 @@ from .make_rest_api_call import MakeRestApiCall
 
 _BLOCK_PREFIX = "FSR-BLOCK-"
 _MAX_NAME_LEN = 79  # FortiGate object name limit
+
+# Quarantine Monitor (runtime IP bans): the wire shape the FortiGate v2
+# connector proved live — a JSON-encoded body sent with a form-urlencoded
+# Content-Type. Bans are runtime state, not config objects: each entry expires
+# on its own (expiry 0 means never) and does not survive a reboot unless the
+# device's banned-IP persistency is enabled.
+_QUARANTINE_FORM_HEADERS = {"Content-Type": "application/x-www-form-urlencoded"}
+_EXPIRY_PRESETS = {
+    "1 Hour": 3600,
+    "6 Hours": 21600,
+    "12 Hours": 43200,
+    "1 Day": 86400,
+    "1 Week": 604800,
+    "1 Month": 2592000,
+    "Never": 0,
+}
 
 
 def _client(config):
@@ -429,4 +446,180 @@ def unblock_ip(config: dict, params: dict) -> dict:
         "removed_policies": removed,
         "address_removed": address_removed,
         "address_retained_reason": retained_reason,
+    }
+
+
+# --- quarantine (ban-IP) flow ---------------------------------------------
+#
+# A second containment style alongside the policy flow above: the FortiOS
+# Quarantine Monitor bans IPv4 addresses at runtime. One call bans a whole
+# batch, no address objects or policies are touched, every entry carries its
+# own expiry, and the ban survives neither expiry nor reboot — so a playbook
+# that fails to clean up still cannot leave the device blocked permanently.
+
+
+def _ban_ips(params, name="ips"):
+    """Parse a comma-separated string (or list) of strict IPv4 addresses."""
+    value = params.get(name)
+    if value in (None, ""):
+        raise ConnectorError("'{0}' is a required parameter".format(name))
+    raw = value if isinstance(value, list) else str(value).split(",")
+    items = [str(item).strip() for item in raw if str(item).strip()]
+    if not items:
+        raise ConnectorError("'{0}' resolved to an empty address list".format(name))
+    addresses = []
+    for item in items:
+        try:
+            parsed = ipaddress.ip_address(item)
+        except ValueError as err:
+            raise ConnectorError(
+                "'{0}' must be IPv4 addresses separated by commas; "
+                "got '{1}'".format(name, item)
+            ) from err
+        if parsed.version != 4:
+            raise ConnectorError(
+                "Only IPv4 addresses are supported by the Quarantine Monitor; "
+                "got '{0}'".format(item)
+            )
+        addresses.append(str(parsed))
+    return addresses
+
+
+def _ban_expiry(params, name="time_to_live", duration_name="duration"):
+    """Resolve the ban duration: a named preset, or 'Custom Time' + duration
+    seconds. Zero means the ban never expires."""
+    preset = (params.get(name) or "1 Hour").strip()
+    if preset == "Custom Time":
+        duration = _int_param(params, duration_name)
+        if duration is None:
+            raise ConnectorError(
+                "'duration' is required when 'time_to_live' is 'Custom Time'"
+            )
+        if duration < 0:
+            raise ConnectorError(
+                "'duration' must be zero (never expires) or a positive number "
+                "of seconds; got '{0}'".format(duration)
+            )
+        return duration
+    if preset not in _EXPIRY_PRESETS:
+        raise ConnectorError(
+            "'time_to_live' must be one of {0}, or 'Custom Time' with a "
+            "'duration' in seconds; got '{1}'".format(
+                ", ".join(sorted(_EXPIRY_PRESETS)), preset
+            )
+        )
+    return _EXPIRY_PRESETS[preset]
+
+
+def _banned_entries(fgc, sn, vdom):
+    """Read the Quarantine Monitor. Returns (entries, banned_ip_set); the
+    entries are passed through verbatim so no vendor field is lost."""
+    body = fgc.make_request(
+        endpoint=_proxy_path(sn, "api/v2/monitor/user/banned/select"),
+        method="GET",
+        params={"vdom": vdom},
+    )
+    results = body.get("results") if isinstance(body, dict) else body
+    if isinstance(results, dict):
+        results = results.get("results")
+    entries = results if isinstance(results, list) else []
+    banned = {entry.get("ip_address") for entry in entries
+              if isinstance(entry, dict) and entry.get("ip_address")}
+    return entries, banned
+
+
+def _ban_post(fgc, sn, vdom, fos_path, body):
+    return fgc.make_request(
+        endpoint=_proxy_path(sn, fos_path),
+        method="POST",
+        params={"vdom": vdom},
+        headers=_QUARANTINE_FORM_HEADERS,
+        data=json.dumps(body),
+    )
+
+
+def quarantine_ip(config: dict, params: dict) -> dict:
+    """Quarantine (ban) IPv4 addresses on a cloud-managed FortiGate through
+    FortiGate Cloud using the Quarantine Monitor: a runtime ban with its own
+    expiry that needs no address objects or policies. Idempotent — addresses
+    that are already banned are reported, not re-banned. Rerunning is safe;
+    leaving the ban in place is also safe, because it expires on its own
+    unless 'time_to_live' is 'Never'."""
+    sn = _require(params, "sn")
+    addresses = _ban_ips(params, "ips")
+    expiry = _ban_expiry(params, "time_to_live", "duration")
+    vdom = (params.get("vdom") or "root").strip() or "root"
+    fgc = _client(config)
+
+    _, banned_now = _banned_entries(fgc, sn, vdom)
+    already = [ip for ip in addresses if ip in banned_now]
+    to_ban = [ip for ip in addresses if ip not in banned_now]
+
+    response = None
+    if to_ban:
+        response = _ban_post(
+            fgc, sn, vdom, "api/v2/monitor/user/banned/add_users",
+            {"ip_addresses": to_ban, "expiry": expiry, "src": "ips"},
+        )
+        _, banned_now = _banned_entries(fgc, sn, vdom)
+
+    result = {
+        "device": sn,
+        "vdom": vdom,
+        "quarantined": [ip for ip in to_ban if ip in banned_now],
+        "pending": [ip for ip in to_ban if ip not in banned_now],
+        "already_quarantined": already,
+        "expiry_seconds": expiry,
+    }
+    if response is not None:
+        result["response"] = response
+    return result
+
+
+def unquarantine_ip(config: dict, params: dict) -> dict:
+    """Release Quarantine Monitor bans created by quarantine_ip (or the CLI's
+    'diagnose user banned-ip add'). Idempotent: addresses that are not banned
+    are reported as such instead of erroring."""
+    sn = _require(params, "sn")
+    addresses = _ban_ips(params, "ips")
+    vdom = (params.get("vdom") or "root").strip() or "root"
+    fgc = _client(config)
+
+    _, banned_now = _banned_entries(fgc, sn, vdom)
+    to_clear = [ip for ip in addresses if ip in banned_now]
+    not_banned = [ip for ip in addresses if ip not in banned_now]
+
+    response = None
+    if to_clear:
+        response = _ban_post(
+            fgc, sn, vdom, "api/v2/monitor/user/banned/clear_users",
+            {"ip_addresses": to_clear},
+        )
+        _, banned_now = _banned_entries(fgc, sn, vdom)
+
+    result = {
+        "device": sn,
+        "vdom": vdom,
+        "released": [ip for ip in to_clear if ip not in banned_now],
+        "still_banned": [ip for ip in to_clear if ip in banned_now],
+        "not_banned": not_banned,
+    }
+    if response is not None:
+        result["response"] = response
+    return result
+
+
+def list_banned_ips(config: dict, params: dict) -> dict:
+    """List the Quarantine Monitor's current IP bans on a cloud-managed
+    FortiGate through FortiGate Cloud. Entries are the vendor's own fields
+    (ip_address, expiry, created, cause), passed through verbatim."""
+    sn = _require(params, "sn")
+    vdom = (params.get("vdom") or "root").strip() or "root"
+    fgc = _client(config)
+    entries, _ = _banned_entries(fgc, sn, vdom)
+    return {
+        "device": sn,
+        "vdom": vdom,
+        "banned": entries,
+        "count": len(entries),
     }

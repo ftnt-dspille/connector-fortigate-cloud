@@ -405,3 +405,141 @@ def test_unblock_ip_idempotent_when_absent(ops, config, router):
     assert result['address_removed'] is False
     assert result['address_retained_reason'] is None
     assert not [c for c in api_calls(router) if c['method'] == 'DELETE']
+
+
+# --- quarantine (ban-IP) flow ---------------------------------------------
+
+
+def banned_entry(ip, expiry=3600):
+    return {'ip_address': ip, 'expiry': expiry, 'created': 1700000000, 'cause': 'ips'}
+
+
+def test_quarantine_ip_sends_the_fortigatev2_wire_shape(ops, config, router):
+    """The ban body is JSON-encoded but sent with a form-urlencoded
+    Content-Type — the shape the FortiGate v2 connector proved live — and the
+    Authorization header must survive the per-call content-type override."""
+    router.add('GET', '/monitor/user/banned/select', FakeResponse(payload={'results': []}))
+    router.add('POST', '/monitor/user/banned/add_users',
+               FakeResponse(payload={'result': 1, 'status': 'success'}))
+    router.add('GET', '/monitor/user/banned/select',
+               FakeResponse(payload={'results': [banned_entry('203.0.113.77')]}))
+
+    result = ops.operations['quarantine_ip'](config, {'sn': SN, 'ips': '203.0.113.77',
+                                                      'time_to_live': '1 Hour'})
+
+    select, post, confirm = api_calls(router)
+    assert select['method'] == 'GET'
+    assert select['url'] == fgt_url('api/v2/monitor/user/banned/select')
+    assert select['params'] == {'vdom': 'root'}
+    assert post['method'] == 'POST'
+    assert post['url'] == fgt_url('api/v2/monitor/user/banned/add_users')
+    assert post['headers']['Content-Type'] == 'application/x-www-form-urlencoded'
+    assert post['headers']['Authorization'] == 'Bearer tok-123'
+    assert json.loads(post['data']) == {'ip_addresses': ['203.0.113.77'],
+                                        'expiry': 3600, 'src': 'ips'}
+    assert result['quarantined'] == ['203.0.113.77']
+    assert result['already_quarantined'] == []
+    assert result['expiry_seconds'] == 3600
+
+
+def test_quarantine_ip_reports_already_banned_without_posting(ops, config, router):
+    router.add('GET', '/monitor/user/banned/select',
+               FakeResponse(payload={'results': [banned_entry('203.0.113.77')]}))
+
+    result = ops.operations['quarantine_ip'](config, {'sn': SN, 'ips': '203.0.113.77'})
+
+    assert result['already_quarantined'] == ['203.0.113.77']
+    assert result['quarantined'] == []
+    assert not [c for c in api_calls(router) if c['method'] == 'POST']
+
+
+def test_quarantine_ip_batch_and_custom_duration(ops, config, router):
+    router.add('GET', '/monitor/user/banned/select', FakeResponse(payload={'results': []}))
+    router.add('POST', '/monitor/user/banned/add_users', FakeResponse(payload={}))
+    router.add('GET', '/monitor/user/banned/select', FakeResponse(payload={'results': [
+        banned_entry('203.0.113.77'), banned_entry('203.0.113.78')]}))
+
+    result = ops.operations['quarantine_ip'](config, {
+        'sn': SN, 'ips': '203.0.113.77, 203.0.113.78',
+        'time_to_live': 'Custom Time', 'duration': 45})
+    post = [c for c in api_calls(router) if c['method'] == 'POST'][0]
+    assert json.loads(post['data']) == {'ip_addresses': ['203.0.113.77', '203.0.113.78'],
+                                        'expiry': 45, 'src': 'ips'}
+    assert result['quarantined'] == ['203.0.113.77', '203.0.113.78']
+
+
+def test_quarantine_ip_accepts_a_list_param(ops, config, router):
+    router.add('GET', '/monitor/user/banned/select', FakeResponse(payload={'results': []}))
+    router.add('POST', '/monitor/user/banned/add_users',
+               FakeResponse(payload={}))
+    router.add('GET', '/monitor/user/banned/select',
+               FakeResponse(payload={'results': [banned_entry('203.0.113.9')]}))
+
+    result = ops.operations['quarantine_ip'](config, {'sn': SN, 'ips': ['203.0.113.9']})
+    assert result['quarantined'] == ['203.0.113.9']
+
+
+def test_quarantine_ip_never_expires_sends_zero(ops, config, router):
+    router.add('GET', '/monitor/user/banned/select', FakeResponse(payload={'results': []}))
+    router.add('POST', '/monitor/user/banned/add_users', FakeResponse(payload={}))
+    router.add('GET', '/monitor/user/banned/select',
+               FakeResponse(payload={'results': [banned_entry('203.0.113.77', 0)]}))
+
+    ops.operations['quarantine_ip'](config, {'sn': SN, 'ips': '203.0.113.77',
+                                             'time_to_live': 'Never'})
+    post = [c for c in api_calls(router) if c['method'] == 'POST'][0]
+    assert json.loads(post['data'])['expiry'] == 0
+
+
+def test_quarantine_ip_rejects_invalid_input(ops, config, connector_error, router):
+    with pytest.raises(connector_error):
+        ops.operations['quarantine_ip'](config, {'sn': SN, 'ips': '999.1.1.1'})
+    with pytest.raises(connector_error):
+        ops.operations['quarantine_ip'](config, {'sn': SN, 'ips': '203.0.113.0/24'})
+    with pytest.raises(connector_error):
+        ops.operations['quarantine_ip'](config, {'sn': SN, 'ips': '203.0.113.77',
+                                                 'time_to_live': 'Fortnight'})
+    with pytest.raises(connector_error):
+        ops.operations['quarantine_ip'](config, {'sn': SN, 'ips': '203.0.113.77',
+                                                 'time_to_live': 'Custom Time'})
+    with pytest.raises(connector_error):
+        ops.operations['quarantine_ip'](config, {'sn': SN, 'ips': '203.0.113.77',
+                                                 'time_to_live': 'Custom Time', 'duration': -5})
+    with pytest.raises(connector_error):
+        ops.operations['quarantine_ip'](config, {'sn': SN})
+    assert api_calls(router) == []
+
+
+def test_unquarantine_ip_clears_only_banned_addresses(ops, config, router):
+    router.add('GET', '/monitor/user/banned/select',
+               FakeResponse(payload={'results': [banned_entry('203.0.113.77')]}))
+    router.add('POST', '/monitor/user/banned/clear_users', FakeResponse(payload={'status': 'success'}))
+    router.add('GET', '/monitor/user/banned/select', FakeResponse(payload={'results': []}))
+
+    result = ops.operations['unquarantine_ip'](config, {'sn': SN,
+                                                        'ips': '203.0.113.77, 203.0.113.78'})
+    post = [c for c in api_calls(router) if c['method'] == 'POST'][0]
+    assert post['url'] == fgt_url('api/v2/monitor/user/banned/clear_users')
+    assert json.loads(post['data']) == {'ip_addresses': ['203.0.113.77']}
+    assert result['released'] == ['203.0.113.77']
+    assert result['not_banned'] == ['203.0.113.78']
+    assert result['still_banned'] == []
+
+
+def test_unquarantine_ip_without_bans_makes_no_write(ops, config, router):
+    router.add('GET', '/monitor/user/banned/select', FakeResponse(payload={'results': []}))
+
+    result = ops.operations['unquarantine_ip'](config, {'sn': SN, 'ips': '203.0.113.77'})
+    assert result['not_banned'] == ['203.0.113.77']
+    assert not [c for c in api_calls(router) if c['method'] == 'POST']
+
+
+def test_list_banned_ips_passes_entries_through(ops, config, router):
+    router.add('GET', '/monitor/user/banned/select',
+               FakeResponse(payload={'results': [banned_entry('203.0.113.77'),
+                                                 banned_entry('203.0.113.78', 0)]}))
+
+    result = ops.operations['list_banned_ips'](config, {'sn': SN})
+    assert result['count'] == 2
+    assert result['banned'][0]['ip_address'] == '203.0.113.77'
+    assert result['banned'][1]['expiry'] == 0

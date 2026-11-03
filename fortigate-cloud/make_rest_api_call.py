@@ -110,8 +110,18 @@ class MakeRestApiCall:
         self.authenticated = True
 
     def make_request(self, endpoint="", params=None, method="GET", headers=None, json_data=None,
-                     ok_statuses=None):
+                     data=None, ok_statuses=None):
         """Issue one FortiGate Cloud API call.
+
+        headers: per-call header overrides merged over the authenticated
+        defaults, so a caller can change Content-Type without losing the
+        Authorization header.
+
+        json_data: JSON-encoded body (Content-Type: application/json).
+        data: pre-encoded body sent verbatim; combined with a form-urlencoded
+        Content-Type override this reproduces the request shape the FortiGate
+        v2 connector proved live for the Quarantine Monitor ban endpoints
+        (JSON body, form content-type).
 
         ok_statuses: optional tuple of additional HTTP status codes to treat as
         success (returning the parsed body) instead of raising ConnectorError.
@@ -120,13 +130,15 @@ class MakeRestApiCall:
         """
         url = self.server_url + endpoint
         request_headers = {"Content-Type": "application/json"}
-        request_headers.update(headers or self.headers)
+        request_headers.update(self.headers)
+        request_headers.update(headers or {})
         try:
             response = requests.request(
                 method=method,
                 url=url,
                 headers=request_headers,
                 json=json_data,
+                data=data,
                 params=params,
                 verify=self.verify_ssl,
                 timeout=60,

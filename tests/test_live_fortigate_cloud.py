@@ -15,10 +15,12 @@ Credentials are read from a .env file at the repo root, or from the environment:
 The IAM API user must have Admin permissions for FortiGate Cloud, otherwise every
 call returns 401 invalid_client even though the token grant itself succeeds.
 
-These tests are read-only except test_live_block_unblock_ip_flow, which writes a
-TEST-NET-3 (documentation-only) deny policy to the configured device and removes
-it again before the test ends; on a device without write entitlement it skips
-with the vendor's 403 permission_deny reason instead of failing.
+These tests are read-only except the containment flows: test_live_block_unblock_ip_flow
+writes a TEST-NET-3 (documentation-only) deny policy, and the quarantine tests ban
+TEST-NET-3 addresses through the Quarantine Monitor. Every write removes what it
+created before the test ends (or, for the expiry test, waits for the ban to expire
+on its own); on a device without write entitlement they skip with the vendor's 403
+permission_deny reason instead of failing.
 
 Note on lockout: FortiCloud throttles repeated password grants with an
 invalid_grant lockout that applies to every client_id on the account and clears
@@ -29,6 +31,7 @@ session-scoped, so a full run performs a single grant.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -48,7 +51,12 @@ def _read_env_file(path: Path) -> dict:
         if not line or line.startswith('#') or '=' not in line:
             continue
         key, _, val = line.partition('=')
-        out.setdefault(key.strip(), val.strip().strip('"').strip("'"))
+        val = val.strip().strip('"').strip("'")
+        # Inline comments are a thing people write; an unparsed one turns the
+        # value into garbage that fails far from where the mistake is.
+        if ' #' in val:
+            val = val.split(' #', 1)[0].strip().strip('"').strip("'")
+        out.setdefault(key.strip(), val)
     return out
 
 
@@ -218,6 +226,89 @@ def test_live_block_unblock_ip_flow(ops, live_config, connector_error):
                                                         {'sn': TEST_SN, 'limit': 10})
     names = [p.get('name') for p in policies.get('results') or []]
     assert 'FSR-BLOCK-203_0_113_77-INBOUND' not in names
+
+
+QUARANTINE_TEST_IP = '203.0.113.78'
+QUARANTINE_EXPIRY_TEST_IP = '203.0.113.79'
+
+
+def _banned_ip_set(ops, live_config):
+    banned = ops.operations['list_banned_ips'](live_config, {'sn': TEST_SN})
+    return {entry.get('ip_address') for entry in banned.get('banned') or []}
+
+
+def _skip_unless_proxy_writes(ops, live_config, connector_error):
+    """Shared gate for the write-path live tests: skip on a down tunnel (the
+    proxy cannot reach the device) or on the vendor's 403 permission_deny (an
+    unentitled device answers before the tunnel is consulted). Returns the
+    device record."""
+    device = ops.operations['get_device'](live_config, {'sn': TEST_SN})
+    if not device.get('tunnelAlive'):
+        pytest.skip('device {0} tunnel is down; the FortiOS proxy needs it up'.format(TEST_SN))
+    return device
+
+
+def _skip_on_permission_deny(connector_error, err):
+    if 'permission_deny' in str(err):
+        pytest.skip(
+            'device {0} is not entitled for FortiOS proxy writes (403 '
+            'permission_deny); quarantine needs a paid FortiGate'.format(TEST_SN)
+        )
+    raise err
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_quarantine_unquarantine_ip_flow(ops, live_config, connector_error):
+    """The full quarantine containment flow against a real device.
+
+    Bans a TEST-NET-3 (documentation-only) address through the Quarantine
+    Monitor, confirms it shows up in the ban list, then releases it. Even if
+    the test dies between the two, the device is safe: the ban carries a
+    300 second expiry, so it reverts on its own.
+    """
+    _skip_unless_proxy_writes(ops, live_config, connector_error)
+    try:
+        result = ops.operations['quarantine_ip'](live_config, {
+            'sn': TEST_SN, 'ips': QUARANTINE_TEST_IP,
+            'time_to_live': 'Custom Time', 'duration': 300,
+        })
+    except connector_error as err:
+        _skip_on_permission_deny(connector_error, err)
+    try:
+        assert result['quarantined'] == [QUARANTINE_TEST_IP], str(result)
+        assert QUARANTINE_TEST_IP in _banned_ip_set(ops, live_config)
+    finally:
+        released = ops.operations['unquarantine_ip'](live_config,
+                                                     {'sn': TEST_SN,
+                                                      'ips': QUARANTINE_TEST_IP})
+    assert released['released'] == [QUARANTINE_TEST_IP], str(released)
+    assert QUARANTINE_TEST_IP not in _banned_ip_set(ops, live_config)
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_quarantine_ip_expires_on_its_own(ops, live_config, connector_error):
+    """The self-reverting property itself: a 45 second ban disappears from the
+    Quarantine Monitor without any cleanup call. The test performs no
+    unquarantine at all — the only failure path that could leave the address
+    banned is a timeout, and that path force-clears before failing."""
+    _skip_unless_proxy_writes(ops, live_config, connector_error)
+    try:
+        result = ops.operations['quarantine_ip'](live_config, {
+            'sn': TEST_SN, 'ips': QUARANTINE_EXPIRY_TEST_IP,
+            'time_to_live': 'Custom Time', 'duration': 45,
+        })
+    except connector_error as err:
+        _skip_on_permission_deny(connector_error, err)
+    assert result['quarantined'] == [QUARANTINE_EXPIRY_TEST_IP], str(result)
+
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        if QUARANTINE_EXPIRY_TEST_IP not in _banned_ip_set(ops, live_config):
+            return  # expired on its own — nothing to clean up
+        time.sleep(10)
+    ops.operations['unquarantine_ip'](live_config, {'sn': TEST_SN,
+                                                    'ips': QUARANTINE_EXPIRY_TEST_IP})
+    pytest.fail('the ban did not expire within 120 seconds')
 
 
 def test_live_bad_credentials_are_rejected(ops, live_config, connector_error):
