@@ -80,7 +80,7 @@ def _load_connector(connector_name: str = CONNECTOR_NAME):
 
     # Load in dependency order so each relative import finds its target.
     for name in ('constants', 'models', 'make_rest_api_call', 'device_actions', 'fos_actions',
-                 'generic_api_call', 'fgt_proxy_actions'):
+                 'generic_api_call', 'fgt_proxy_actions', 'script_actions'):
         _load(name)
     return _load('operations')
 

@@ -11,6 +11,7 @@ from .models import (
     AddDeviceParams,
     AddReportScheduleParams,
     GetDevicesParams,
+    ListFirmwareUpgradesParams,
     ReportScheduleParams,
     SnParams,
     UpdateAutoBackupParams,
@@ -116,3 +117,11 @@ def update_auto_backup_setting(config: dict[str, Any], params: dict[str, Any]) -
     return _client(config).make_request(
         endpoint="/devices/{0}/configbackups/setting".format(p.sn), method="PUT", json_data=data
     )
+
+
+def list_firmware_upgrades(config: dict[str, Any], params: dict[str, Any]) -> Any:
+    """List firmware upgrade jobs in the FortiGate Cloud account. Read-only:
+    this connector does not start or change firmware upgrades."""
+    p = parse_params(ListFirmwareUpgradesParams, params)
+    query = {} if p.folder is None else {"folder": p.folder}
+    return _client(config).make_request(endpoint="/upgrade", method="GET", params=query)

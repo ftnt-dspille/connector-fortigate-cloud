@@ -323,6 +323,350 @@ def test_live_quarantine_ip_expires_on_its_own(ops, live_config, connector_error
     pytest.fail('the ban did not expire within 120 seconds')
 
 
+# --- write-path and variant coverage ---------------------------------------
+#
+# Every test below leaves the device as it found it: objects are removed in a
+# finally block, and existence is checked with a direct read of the object (the
+# proxy serves stale list views, so a list is never trusted to prove absence).
+
+PROBE_ADDRESS = 'FSR-LIVE-PROBE-ADDR'
+FOREIGN_POLICY = 'FSR-LIVE-FOREIGN'
+
+
+def _fos(ops, live_config, path, method='GET', payload=None, query=None):
+    params = {'sn': TEST_SN, 'fos_api_path': path, 'method': method}
+    if payload is not None:
+        params['payload'] = payload
+    if query is not None:
+        params['query_parameters'] = query
+    return ops.operations['fos_api_call'](live_config, params)
+
+
+def _is_absent(ops, live_config, connector_error, path):
+    """True when a direct read of the object says it does not exist."""
+    try:
+        _fos(ops, live_config, path)
+    except connector_error as err:
+        if 'not_found' in str(err).lower() or 'not found' in str(err).lower():
+            return True
+        raise
+    return False
+
+
+def _delete_quietly(ops, live_config, connector_error, path):
+    try:
+        _fos(ops, live_config, path, method='DELETE')
+    except connector_error as err:
+        if 'not_found' not in str(err).lower() and 'not found' not in str(err).lower():
+            raise
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_generic_api_call_reads_the_device_list(ops, live_config):
+    result = ops.operations['generic_api_call'](live_config, {'endpoint': 'devices'})
+    devices = result if isinstance(result, list) else result.get('data') or []
+    assert any(d.get('sn') == TEST_SN for d in devices)
+
+
+def test_live_get_devices_accepts_sort(ops, live_config):
+    result = ops.operations['get_devices'](live_config, {'limit': 5, 'sort': 'sn'})
+    assert isinstance(result, (list, dict))
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_create_and_delete_firewall_address_roundtrip(ops, live_config, connector_error):
+    _skip_unless_proxy_writes(ops, live_config, connector_error)
+    path = 'api/v2/cmdb/firewall/address/' + PROBE_ADDRESS
+    _delete_quietly(ops, live_config, connector_error, path)  # a previous aborted run
+    try:
+        try:
+            created = ops.operations['create_firewall_address'](live_config, {
+                'sn': TEST_SN, 'name': PROBE_ADDRESS, 'ip': '203.0.113.90/32',
+                'comment': 'connector live test'})
+        except connector_error as err:
+            _skip_on_permission_deny(connector_error, err)
+        assert created.get('status') == 'success', str(created)
+        read = _fos(ops, live_config, path)
+        assert read['results'][0]['subnet'] == '203.0.113.90 255.255.255.255'
+        assert read['results'][0]['comment'] == 'connector live test'
+    finally:
+        ops.operations['delete_firewall_address'](live_config, {'sn': TEST_SN, 'name': PROBE_ADDRESS})
+    assert _is_absent(ops, live_config, connector_error, path)
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_fos_api_call_post_put_delete_roundtrip(ops, live_config, connector_error):
+    """The generic FortiOS call with every write verb."""
+    _skip_unless_proxy_writes(ops, live_config, connector_error)
+    path = 'api/v2/cmdb/firewall/address/' + PROBE_ADDRESS
+    _delete_quietly(ops, live_config, connector_error, path)
+    try:
+        try:
+            _fos(ops, live_config, 'api/v2/cmdb/firewall/address', 'POST', payload={
+                'name': PROBE_ADDRESS, 'type': 'ipmask', 'subnet': '203.0.113.91 255.255.255.255'})
+        except connector_error as err:
+            _skip_on_permission_deny(connector_error, err)
+        put = _fos(ops, live_config, path, 'PUT', payload='{"comment": "edited by PUT"}')
+        assert put.get('status') == 'success', str(put)
+        assert _fos(ops, live_config, path)['results'][0]['comment'] == 'edited by PUT'
+    finally:
+        _delete_quietly(ops, live_config, connector_error, path)
+    assert _is_absent(ops, live_config, connector_error, path)
+
+
+@pytest.mark.xfail(
+    reason="FortiGate Cloud answers this PUT with 500 internal_error on the lab VM. The portal's Revisions "
+           "page says FortiManagement Cloud Standard is required for config backup, so this looks like an "
+           "entitlement gate - unconfirmed. Remove the xfail once it passes on an entitled device.",
+    strict=False)
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_update_auto_backup_setting_sends_a_valid_put(ops, live_config):
+    """A PUT of the setting's current value: proves the request shape against the
+    real API without changing the device's backup configuration."""
+    current = ops.operations['get_auto_backup_setting'](live_config, {'sn': TEST_SN})
+    result = ops.operations['update_auto_backup_setting'](live_config, {
+        'sn': TEST_SN, 'enable': bool(current.get('enable'))})
+    assert result is not None
+    after = ops.operations['get_auto_backup_setting'](live_config, {'sn': TEST_SN})
+    assert bool(after.get('enable')) == bool(current.get('enable'))
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_report_schedule_roundtrip(ops, live_config):
+    """Add, read and delete a report schedule. The add needs the id of an
+    existing report configuration, which the connector cannot list; supply it
+    as FGC_TEST_REPORT_CONFIG_OID."""
+    config_oid = _cfg('FGC_TEST_REPORT_CONFIG_OID')
+    if not config_oid:
+        pytest.skip('set FGC_TEST_REPORT_CONFIG_OID to a report configuration id on the device')
+    created = ops.operations['add_report_schedule'](live_config, {
+        'sn': TEST_SN, 'config_oid': config_oid, 'schedule_type': 'daily'})
+    oid = (created.get('data') or created).get('oid') if isinstance(created, dict) else None
+    try:
+        listed = ops.operations['get_report_schedules'](live_config, {'sn': TEST_SN})
+        assert listed.get('total', 0) >= 1, str(listed)
+        oid = oid or listed['data'][0].get('oid')
+        one = ops.operations['get_report_schedule'](live_config, {'sn': TEST_SN, 'oid': oid})
+        assert one is not None
+    finally:
+        if oid:
+            ops.operations['delete_report_schedule'](live_config, {'sn': TEST_SN, 'oid': oid})
+
+
+def test_live_expired_token_is_renewed_with_the_refresh_grant(ops, live_config):
+    """Age the cached token past its expiry and confirm the next call renews it
+    through the refresh_token grant (no password grant) and still works."""
+    import sys
+    rest = sys.modules['fsr_test_pkg_fortigate_cloud.make_rest_api_call']
+    ops.operations['get_devices'](live_config, {'limit': 1})
+    assert rest._TOKEN_CACHE, 'the first call should have cached a token'
+    key = next(iter(rest._TOKEN_CACHE))
+    old_access = rest._TOKEN_CACHE[key]['access_token']
+    assert rest._TOKEN_CACHE[key].get('refresh_token'), 'the IAM grant should return a refresh_token'
+    rest._TOKEN_CACHE[key]['expires_at'] = 0
+
+    grants = []
+    original = rest.MakeRestApiCall._post_token
+
+    def spy(self, data):
+        grants.append(data['grant_type'])
+        return original(self, data)
+
+    rest.MakeRestApiCall._post_token = spy
+    try:
+        result = ops.operations['get_devices'](live_config, {'limit': 1})
+    finally:
+        rest.MakeRestApiCall._post_token = original
+    assert result is not None
+    assert grants == ['refresh_token'], grants
+    renewed = rest._TOKEN_CACHE[key]
+    assert renewed['access_token'] != old_access or renewed['expires_at'] > time.time()
+
+
+def _top_policy_names(ops, live_config, limit=10):
+    listed = ops.operations['list_firewall_policies'](live_config, {'sn': TEST_SN, 'limit': limit})
+    return [p.get('name') for p in listed.get('results') or []]
+
+
+def _wait_for_top(ops, live_config, names):
+    for _ in range(8):
+        top = _top_policy_names(ops, live_config)
+        if all(n in top[:len(names)] for n in names):
+            return top
+        time.sleep(5)
+    return _top_policy_names(ops, live_config)
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_block_unblock_cidr_both_directions_with_custom_interfaces(ops, live_config, connector_error):
+    _skip_unless_proxy_writes(ops, live_config, connector_error)
+    names = ['FSR-BLOCK-203_0_113_80-30-INBOUND', 'FSR-BLOCK-203_0_113_80-30-OUTBOUND']
+    try:
+        result = ops.operations['block_ip'](live_config, {
+            'sn': TEST_SN, 'ip': '203.0.113.80/30', 'direction': 'both',
+            'srcintf': 'port1', 'dstintf': 'port2'})
+    except connector_error as err:
+        _skip_on_permission_deny(connector_error, err)
+        raise
+    try:
+        assert [p['name'] for p in result['policies']] == names
+        assert all(p['created'] and p['moved_to_top'] is not None for p in result['policies'])
+        for p in result['policies']:
+            policy_path = 'api/v2/cmdb/firewall/policy/{0}'.format(p['policyid'])
+            body = _fos(ops, live_config, policy_path)['results'][0]
+            assert body['action'] == 'deny'
+            assert [i['name'] for i in body['srcintf']] == ['port1']
+            assert [i['name'] for i in body['dstintf']] == ['port2']
+        top = _wait_for_top(ops, live_config, names)
+        assert set(top[:2]) == set(names), top
+        addr = _fos(ops, live_config, 'api/v2/cmdb/firewall/address/FSR-BLOCK-203_0_113_80-30')
+        assert addr['results'][0]['subnet'] == '203.0.113.80 255.255.255.252'
+    finally:
+        removed = ops.operations['unblock_ip'](live_config, {'sn': TEST_SN, 'ip': '203.0.113.80/30'})
+    assert {p['name'] for p in removed['removed_policies']} == set(names)
+    assert removed['address_removed'] is True
+    address_path = 'api/v2/cmdb/firewall/address/FSR-BLOCK-203_0_113_80-30'
+    assert _is_absent(ops, live_config, connector_error, address_path)
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_block_unblock_outbound_direction(ops, live_config, connector_error):
+    _skip_unless_proxy_writes(ops, live_config, connector_error)
+    name = 'FSR-BLOCK-203_0_113_81-OUTBOUND'
+    try:
+        result = ops.operations['block_ip'](live_config, {
+            'sn': TEST_SN, 'ip': '203.0.113.81', 'direction': 'outbound'})
+    except connector_error as err:
+        _skip_on_permission_deny(connector_error, err)
+        raise
+    try:
+        assert [p['name'] for p in result['policies']] == [name]
+        body = _fos(ops, live_config,
+                    'api/v2/cmdb/firewall/policy/{0}'.format(result['policies'][0]['policyid']))['results'][0]
+        # Outbound: the blocked address is the DESTINATION, the source is "all".
+        assert [a['name'] for a in body['dstaddr']] == ['FSR-BLOCK-203_0_113_81']
+        assert [a['name'] for a in body['srcaddr']] == ['all']
+    finally:
+        removed = ops.operations['unblock_ip'](live_config, {'sn': TEST_SN, 'ip': '203.0.113.81'})
+    assert [p['name'] for p in removed['removed_policies']] == [name]
+    assert removed['address_removed'] is True
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_unblock_retains_an_address_a_foreign_policy_references(ops, live_config, connector_error):
+    _skip_unless_proxy_writes(ops, live_config, connector_error)
+    address = 'FSR-BLOCK-203_0_113_82'
+    addr_path = 'api/v2/cmdb/firewall/address/' + address
+    foreign_id = None
+    try:
+        ops.operations['block_ip'](live_config, {'sn': TEST_SN, 'ip': '203.0.113.82', 'direction': 'inbound'})
+    except connector_error as err:
+        _skip_on_permission_deny(connector_error, err)
+        raise
+    try:
+        created = _fos(ops, live_config, 'api/v2/cmdb/firewall/policy', 'POST', payload={
+            'name': FOREIGN_POLICY, 'action': 'deny', 'srcintf': [{'name': 'port1'}],
+            'dstintf': [{'name': 'port2'}], 'srcaddr': [{'name': 'all'}],
+            'dstaddr': [{'name': address}], 'schedule': 'always', 'service': [{'name': 'ALL'}]})
+        foreign_id = created['mkey']
+        first = ops.operations['unblock_ip'](live_config, {'sn': TEST_SN, 'ip': '203.0.113.82'})
+        assert first['address_removed'] is False, str(first)
+        assert FOREIGN_POLICY in (first['address_retained_reason'] or ''), str(first)
+        assert not _is_absent(ops, live_config, connector_error, addr_path), 'the address must survive'
+    finally:
+        if foreign_id is not None:
+            _delete_quietly(ops, live_config, connector_error,
+                            'api/v2/cmdb/firewall/policy/{0}'.format(foreign_id))
+        final = ops.operations['unblock_ip'](live_config, {'sn': TEST_SN, 'ip': '203.0.113.82'})
+    assert final['address_removed'] is True, str(final)
+    assert _is_absent(ops, live_config, connector_error, addr_path)
+
+
+# --- CLI scripts, runs and firmware upgrade jobs -----------------------------
+#
+# The script is stored in the FortiGate Cloud account and removed again in a
+# finally block. It runs a read-only CLI command ("get system status") on the
+# test device; those runs stay in the run history, which cannot be deleted.
+
+SCRIPT_NAME = 'FSR-LIVE-PROBE-SCRIPT'
+
+
+def _delete_scripts_named(ops, live_config, name):
+    for item in ops.operations['list_scripts'](live_config, {}):
+        if item.get('name') == name:
+            ops.operations['delete_script'](live_config, {'oid': item['oid']})
+
+
+@pytest.fixture
+def probe_script(ops, live_config):
+    """A stored read-only script, deleted when the test ends."""
+    _delete_scripts_named(ops, live_config, SCRIPT_NAME)  # an aborted earlier run
+    created = ops.operations['create_script'](live_config, {
+        'name': SCRIPT_NAME, 'script': 'get system status',
+        'description': 'connector live test, safe to delete'})
+    try:
+        yield created
+    finally:
+        _delete_scripts_named(ops, live_config, SCRIPT_NAME)
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_script_create_list_run_read_and_delete(ops, live_config, probe_script):
+    oid = probe_script['oid']
+    assert probe_script['name'] == SCRIPT_NAME
+    listed = ops.operations['list_scripts'](live_config, {'include_content': True})
+    assert oid in [item['oid'] for item in listed]
+
+    result = ops.operations['run_script'](live_config, {'oid': oid, 'sns': TEST_SN, 'timeout': 180})
+    assert result['scheduled'] == [TEST_SN], str(result)
+    assert result['timed_out'] is False, str(result)
+    assert len(result['tasks']) == 1, str(result)
+    outcome = result['tasks'][0]
+    assert outcome['status'] == 'SUCCEED', str(outcome)
+    assert 'get system status' in outcome['output'] and TEST_SN in outcome['output']
+
+    runs = ops.operations['list_script_tasks'](live_config, {})
+    assert outcome['oid'] in [run['oid'] for run in runs]
+    again = ops.operations['get_script_task_output'](live_config, {
+        'task_oid': outcome['oid'], 'archive_time': outcome['archive_time']})
+    assert again['output'] == outcome['output']
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_run_script_without_waiting_returns_before_the_task_exists(ops, live_config, probe_script):
+    known = {run['oid'] for run in ops.operations['list_script_tasks'](live_config, {})}
+    result = ops.operations['run_script'](live_config, {
+        'oid': probe_script['oid'], 'sns': TEST_SN, 'wait': False})
+    assert result['scheduled'] == [TEST_SN] and result['tasks'] == [] and result['waited'] is False
+    # Let the run finish so nothing is left running when the script is deleted.
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        runs = ops.operations['list_script_tasks'](live_config, {})
+        if any(r['oid'] not in known and r.get('scriptName') == SCRIPT_NAME
+               and r.get('taskStatus') == 'SUCCEED' for r in runs):
+            return
+        time.sleep(5)
+    pytest.fail('the run did not finish within 120 seconds')
+
+
+@pytest.mark.skipif(not TEST_SN, reason='set FGC_TEST_SN to a serial number in the account')
+def test_live_run_script_on_a_device_not_in_the_account_is_rejected_clearly(
+        ops, live_config, probe_script, connector_error):
+    """FortiGate Cloud refuses the whole call for a serial it does not know;
+    the error must name that serial, and no run may be created."""
+    known = {run['oid'] for run in ops.operations['list_script_tasks'](live_config, {})}
+    with pytest.raises(connector_error, match='FGVMBOGUS0000000'):
+        ops.operations['run_script'](live_config, {
+            'oid': probe_script['oid'], 'sns': 'FGVMBOGUS0000000', 'timeout': 30})
+    after = {run['oid'] for run in ops.operations['list_script_tasks'](live_config, {})}
+    assert after == known
+
+
+def test_live_list_firmware_upgrades_reads_the_job_list(ops, live_config):
+    result = ops.operations['list_firmware_upgrades'](live_config, {'folder': 0})
+    assert isinstance(result, list)
+
+
 def test_live_bad_credentials_are_rejected(ops, live_config, connector_error):
     """A wrong password must raise rather than silently pass.
 

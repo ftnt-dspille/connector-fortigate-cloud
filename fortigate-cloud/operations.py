@@ -18,6 +18,7 @@ from .device_actions import (
     get_devices,
     get_report_schedule,
     get_report_schedules,
+    list_firmware_upgrades,
     update_auto_backup_setting,
     update_device_management,
 )
@@ -36,6 +37,14 @@ from .fgt_proxy_actions import (
 from .fos_actions import fos_api_call
 from .generic_api_call import generic_api_call
 from .make_rest_api_call import MakeRestApiCall
+from .script_actions import (
+    create_script,
+    delete_script,
+    get_script_task_output,
+    list_script_tasks,
+    list_scripts,
+    run_script,
+)
 
 logger = get_logger(CONNECTOR_NAME)
 
@@ -81,4 +90,11 @@ operations: dict[str, Operation] = {
     "quarantine_ip": quarantine_ip,
     "unquarantine_ip": unquarantine_ip,
     "list_banned_ips": list_banned_ips,
+    "list_scripts": list_scripts,
+    "create_script": create_script,
+    "delete_script": delete_script,
+    "run_script": run_script,
+    "list_script_tasks": list_script_tasks,
+    "get_script_task_output": get_script_task_output,
+    "list_firmware_upgrades": list_firmware_upgrades,
 }

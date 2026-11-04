@@ -1,3 +1,37 @@
+#### 1.4.0
+
+##### What's Changed
+
+- **CLI scripts**: new operations to store, list and delete CLI scripts in the
+  FortiGate Cloud account (List CLI Scripts, Create CLI Script, Delete CLI
+  Script).
+- **Run a script and get its output**: Run CLI Script runs a stored script on
+  one or more FortiGates immediately. By default it waits until each device
+  finishes and returns the device's status and CLI output; with Wait For
+  Results cleared it returns as soon as FortiGate Cloud accepts the run.
+  Devices FortiGate Cloud reports as busy or invalid are listed in the result
+  rather than raised; a serial number that is not in the account makes
+  FortiGate Cloud reject the whole call, and the error names the serial. List CLI Script Runs and Get CLI Script Output read
+  earlier runs back.
+- **Firmware upgrade jobs**: List Firmware Upgrades reads the account's
+  upgrade jobs. It is read-only; the connector does not start or change
+  firmware upgrades.
+- **Typed parameters and responses**: every operation's parameters are
+  validated by pydantic models, and responses the orchestrations branch on are
+  parsed into typed models, so a malformed vendor reply fails with a clear
+  error instead of being read as empty. pydantic is now a dependency.
+- **Fix**: Block IP read the new policy's id from the wrong place in the
+  FortiGate Cloud reply and failed after creating the policy.
+
+##### Notes
+
+- The script, script-run and firmware-upgrade calls are served by FortiGate
+  Cloud but are not part of its published API specification. Their request
+  shapes were captured from the product and verified live, so they may change
+  without notice.
+- Run CLI Script executes real commands on the device. Run only scripts you
+  trust.
+
 #### 1.3.0
 
 ##### What's Changed

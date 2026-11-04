@@ -1,8 +1,8 @@
 {
   "name": "fortigate-cloud",
   "label": "FortiGate Cloud",
-  "version": "1.3.0",
-  "description": "FortiGate Cloud is a cloud-based management platform for FortiGate devices. This connector facilitates automated operations to retrieve and add devices provisioned to FortiGate Cloud, manage their configuration backup and report schedules, proxy FortiOS API calls to a managed FortiGate through FortiGate Cloud, and run curated FortiOS proxy operations on a managed FortiGate, including blocking and unblocking IP addresses.",
+  "version": "1.4.0",
+  "description": "FortiGate Cloud is a cloud-based management platform for FortiGate devices. This connector facilitates automated operations to retrieve and add devices provisioned to FortiGate Cloud, manage their configuration backup and report schedules, proxy FortiOS API calls to a managed FortiGate through FortiGate Cloud, and run curated FortiOS proxy operations on a managed FortiGate, including blocking and unblocking IP addresses, and to store and run CLI scripts on managed FortiGates and read their output.",
   "publisher": "Fortinet CSE",
   "cs_approved": false,
   "cs_compatible": true,
@@ -1119,6 +1119,272 @@
           "description": "FortiOS VDOM that owns the Quarantine Monitor list. Defaults to root.",
           "tooltip": "FortiOS VDOM that owns the Quarantine Monitor list. Defaults to root.",
           "value": "root"
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "list_scripts",
+      "title": "List CLI Scripts",
+      "annotation": "list_scripts",
+      "description": "Lists the CLI scripts stored in the FortiGate Cloud account, optionally with the script text. This call is served by FortiGate Cloud but is not in the published API specification; it was verified live.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "include_content",
+          "title": "Include Script Text",
+          "type": "checkbox",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Select this option to return each script's text as well as its name.",
+          "tooltip": "Select this option to return each script's text as well as its name.",
+          "value": false
+        },
+        {
+          "name": "folder",
+          "title": "Folder",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Folder id to list scripts from. Leave empty for the account default.",
+          "tooltip": "Folder id to list scripts from. Leave empty for the account default."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "create_script",
+      "title": "Create CLI Script",
+      "annotation": "create_script",
+      "description": "Stores a CLI script in the FortiGate Cloud account. Creating a script does not run it; use Run CLI Script for that. This call is served by FortiGate Cloud but is not in the published API specification; it was verified live.",
+      "category": "miscellaneous",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "name",
+          "title": "Name",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "Name for the script.",
+          "tooltip": "Name for the script."
+        },
+        {
+          "name": "script",
+          "title": "CLI Script",
+          "type": "textarea",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "The FortiOS CLI commands, one per line, for example: get system status",
+          "tooltip": "The FortiOS CLI commands, one per line, for example: get system status"
+        },
+        {
+          "name": "description",
+          "title": "Description",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Optional description shown in the script list.",
+          "tooltip": "Optional description shown in the script list."
+        },
+        {
+          "name": "device_type",
+          "title": "Device Type",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "The device type the script targets. Defaults to FortiGate.",
+          "tooltip": "The device type the script targets. Defaults to FortiGate.",
+          "value": "FortiGate"
+        },
+        {
+          "name": "folder",
+          "title": "Folder",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Folder id to store the script in. Defaults to 0.",
+          "tooltip": "Folder id to store the script in. Defaults to 0."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "delete_script",
+      "title": "Delete CLI Script",
+      "annotation": "delete_script",
+      "description": "Deletes a stored CLI script. The history of earlier runs is kept. This call is served by FortiGate Cloud but is not in the published API specification; it was verified live.",
+      "category": "miscellaneous",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "oid",
+          "title": "Script ID",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "The id of the script, as returned by List CLI Scripts or Create CLI Script.",
+          "tooltip": "The id of the script, as returned by List CLI Scripts or Create CLI Script."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "run_script",
+      "title": "Run CLI Script",
+      "annotation": "run_script",
+      "description": "Runs a stored CLI script on one or more FortiGates immediately. By default the operation waits until each device finishes and returns its status and CLI output; devices reported as busy or invalid are listed, not raised. The script executes real commands on the device, so run only scripts you trust. This call is served by FortiGate Cloud but is not in the published API specification; it was verified live.",
+      "category": "remediation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "oid",
+          "title": "Script ID",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "The id of the script to run.",
+          "tooltip": "The id of the script to run."
+        },
+        {
+          "name": "sns",
+          "title": "Serial Numbers",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "One or more FortiGate serial numbers, comma-separated.",
+          "tooltip": "One or more FortiGate serial numbers, comma-separated.",
+          "placeholder": "For example: FGT60D4615007890, FGT60D4615007891"
+        },
+        {
+          "name": "script_name",
+          "title": "Script Name",
+          "type": "text",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "The script's name. Looked up from the Script ID when left empty.",
+          "tooltip": "The script's name. Looked up from the Script ID when left empty."
+        },
+        {
+          "name": "wait",
+          "title": "Wait For Results",
+          "type": "checkbox",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Select this option to wait for each device to finish and return its output. Clear it to return as soon as FortiGate Cloud accepts the run.",
+          "tooltip": "Select this option to wait for each device to finish and return its output. Clear it to return as soon as FortiGate Cloud accepts the run.",
+          "value": true
+        },
+        {
+          "name": "timeout",
+          "title": "Timeout (seconds)",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "How long to wait for the run to finish, 1 to 900. Defaults to 120.",
+          "tooltip": "How long to wait for the run to finish, 1 to 900. Defaults to 120.",
+          "value": 120
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "list_script_tasks",
+      "title": "List CLI Script Runs",
+      "annotation": "list_script_tasks",
+      "description": "Lists CLI script runs, one entry per device a script ran on, newest first, with each run's status and short message. This call is served by FortiGate Cloud but is not in the published API specification; it was verified live.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "folder",
+          "title": "Folder",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Folder id to list script runs from. Leave empty for the account default.",
+          "tooltip": "Folder id to list script runs from. Leave empty for the account default."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "get_script_task_output",
+      "title": "Get CLI Script Output",
+      "annotation": "get_script_task_output",
+      "description": "Reads the CLI output a script produced on one device. This call is served by FortiGate Cloud but is not in the published API specification; it was verified live.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "task_oid",
+          "title": "Task ID",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": true,
+          "description": "The id of the script run, as returned by List CLI Script Runs or Run CLI Script.",
+          "tooltip": "The id of the script run, as returned by List CLI Script Runs or Run CLI Script."
+        },
+        {
+          "name": "archive_time",
+          "title": "Archive Time",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "The run's archiveTime from the run list. Optional.",
+          "tooltip": "The run's archiveTime from the run list. Optional."
+        }
+      ],
+      "output_schema": {}
+    },
+    {
+      "operation": "list_firmware_upgrades",
+      "title": "List Firmware Upgrades",
+      "annotation": "list_firmware_upgrades",
+      "description": "Lists firmware upgrade jobs in the FortiGate Cloud account. Read-only: this connector does not start or change firmware upgrades. This call is served by FortiGate Cloud but is not in the published API specification; it was verified live.",
+      "category": "investigation",
+      "is_config_required": true,
+      "visible": true,
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "folder",
+          "title": "Folder",
+          "type": "integer",
+          "editable": true,
+          "visible": true,
+          "required": false,
+          "description": "Folder id to list firmware upgrade jobs from. Leave empty for the account default.",
+          "tooltip": "Folder id to list firmware upgrade jobs from. Leave empty for the account default."
         }
       ],
       "output_schema": {}

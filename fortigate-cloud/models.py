@@ -694,6 +694,150 @@ class BannedListResult(Result):
     count: int
 
 
+# --- CLI scripts, script tasks and firmware upgrade jobs ---------------------
+#
+# These calls are served by the FortiGate Cloud gateway but are not part of the
+# published API specification; their shapes were captured from the product and
+# verified live.
+
+DEFAULT_SCRIPT_TIMEOUT = 120
+MAX_SCRIPT_TIMEOUT = 900
+
+
+def _blank_bool(default: Any) -> Any:
+    def convert(value: Any) -> Any:
+        return default if value is None or (isinstance(value, str) and not value.strip()) else value
+
+    return convert
+
+
+class ListScriptsParams(Params):
+    include_content: Annotated[bool, BeforeValidator(_blank_bool(False))] = False
+    folder: OptInt = None
+
+
+class CreateScriptParams(Params):
+    name: NonBlankStr
+    script: NonBlankStr
+    description: OptStr = None
+    device_type: Annotated[str, BeforeValidator(_blank_bool("FortiGate"))] = "FortiGate"
+    folder: OptInt = None
+
+
+class DeleteScriptParams(Params):
+    oid: int
+
+
+def _split_serials(value: Any) -> Any:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        raise ValueError("required")
+    raw = value if isinstance(value, list) else str(value).split(",")
+    items = [str(item).strip() for item in raw if str(item).strip()]
+    if not items:
+        raise ValueError("required")
+    return items
+
+
+class RunScriptParams(Params):
+    oid: int
+    script_name: OptStr = None
+    sns: Annotated[list[str], BeforeValidator(_split_serials)]
+    wait: Annotated[bool, BeforeValidator(_blank_bool(True))] = True
+    timeout: Annotated[int, BeforeValidator(_blank_bool(DEFAULT_SCRIPT_TIMEOUT))] = DEFAULT_SCRIPT_TIMEOUT
+
+    @field_validator("timeout")
+    @classmethod
+    def _timeout_in_range(cls, value: int) -> int:
+        if not 1 <= value <= MAX_SCRIPT_TIMEOUT:
+            raise ValueError(
+                "'timeout' must be between 1 and {0} seconds; got '{1}'".format(MAX_SCRIPT_TIMEOUT, value)
+            )
+        return value
+
+
+class ListScriptTasksParams(Params):
+    folder: OptInt = None
+
+
+class ScriptTaskOutputParams(Params):
+    task_oid: int
+    archive_time: OptInt = None
+
+
+class ListFirmwareUpgradesParams(Params):
+    folder: OptInt = None
+
+
+class Script(VendorModel):
+    oid: int
+    name: Optional[str] = None
+
+
+class ScheduleReply(VendorModel):
+    """The reply to scheduling a script: which devices accepted it."""
+
+    successDevs: list[str] = Field(default_factory=list)
+    conflictDevs: list[str] = Field(default_factory=list)
+    otherInvalidDevs: list[str] = Field(default_factory=list)
+
+
+class ScriptTask(VendorModel):
+    oid: int
+    scriptName: Optional[str] = None
+    sn: Optional[str] = None
+    taskStatus: Optional[str] = None
+    scheduledTime: Optional[int] = None
+    archiveTime: Optional[int] = None
+    message: Optional[str] = None
+
+
+# Task states that mean "still going"; any other state is final.
+PENDING_TASK_STATES = frozenset(
+    {"PENDING", "RUNNING", "SCHEDULED", "WAITING", "QUEUED", "IN_PROGRESS", "INPROGRESS", "STARTED"}
+)
+
+
+def parse_reply_list(model: type[V], body: Any, what: str) -> list[V]:
+    """Validate a vendor response that is a JSON array of objects."""
+    if not isinstance(body, list):
+        raise ConnectorError(
+            "Unexpected response while reading {0}: expected a JSON array, got {1}: {2}".format(
+                what, type(body).__name__, str(body)[:200]
+            )
+        )
+    return [parse_reply(model, item, what) for item in body]
+
+
+class TaskOutcome(BaseModel):
+    oid: int
+    sn: Optional[str] = None
+    status: Optional[str] = None
+    message: Optional[str] = None
+    archive_time: Optional[int] = None
+    output: Optional[str] = None
+
+
+class RunScriptResult(Result):
+    oid: int
+    script_name: str
+    scheduled: list[str]
+    conflict: list[str]
+    invalid: list[str]
+    waited: bool
+    timed_out: bool
+    tasks: list[TaskOutcome]
+
+
+class DeleteScriptResult(Result):
+    oid: int
+    deleted: bool
+
+
+class ScriptTaskOutputResult(Result):
+    task_oid: int
+    output: str
+
+
 # Every operation's parameter model, so tooling (and the test that keeps
 # info.json and the code in step) can see the contract in one place.
 OPERATION_PARAMS: dict[str, type[Params]] = {
@@ -719,4 +863,11 @@ OPERATION_PARAMS: dict[str, type[Params]] = {
     "quarantine_ip": QuarantineParams,
     "unquarantine_ip": UnquarantineParams,
     "list_banned_ips": ListBannedParams,
+    "list_scripts": ListScriptsParams,
+    "create_script": CreateScriptParams,
+    "delete_script": DeleteScriptParams,
+    "run_script": RunScriptParams,
+    "list_script_tasks": ListScriptTasksParams,
+    "get_script_task_output": ScriptTaskOutputParams,
+    "list_firmware_upgrades": ListFirmwareUpgradesParams,
 }
