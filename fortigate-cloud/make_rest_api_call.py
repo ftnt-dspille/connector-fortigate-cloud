@@ -5,12 +5,13 @@
   Copyright end """
 
 import time
-from typing import Any
+from typing import Any, Optional
 
 import requests
 from connectors.core.connector import ConnectorError, get_logger
 
 from .constants import API_BASE_PATH, CONNECTOR_NAME, ERROR_MESSAGES, REGION_URLS, TOKEN_URL
+from .models import ConnectorConfig
 
 logger = get_logger(CONNECTOR_NAME)
 
@@ -18,15 +19,16 @@ logger = get_logger(CONNECTOR_NAME)
 # throttles repeated password grants with an invalid_grant lockout that applies to
 # every client_id on the account and self-clears only after 15-30 minutes, so a
 # per-call login would take the whole account down under playbook load.
-_TOKEN_CACHE: dict[tuple[str, str, str], dict[str, Any]] = {}
+_TOKEN_CACHE: dict[tuple[Optional[str], str, str], dict[str, Any]] = {}
 _TOKEN_EXPIRY_BUFFER = 300
 
 
 class MakeRestApiCall:
 
-    def __init__(self, config):
-        region = config.get("region") or "Global"
-        server_url = (config.get("server_url") or "").strip().strip("/")
+    def __init__(self, config: dict[str, Any]) -> None:
+        cfg = ConnectorConfig.model_validate(config)
+        region = cfg.region
+        server_url = cfg.server_url
         if server_url:
             # An explicit Server URL overrides the region picker, so that a new
             # regional host can be used before this connector ships support for it.
@@ -40,7 +42,7 @@ class MakeRestApiCall:
                 "https://api.fortigate.forticloud.com"
             )
         else:
-            base = REGION_URLS.get(region)
+            base = REGION_URLS.get(region, "")
             if not base:
                 raise ConnectorError(
                     "Unknown region '{0}'. Expected one of: {1}".format(
@@ -48,18 +50,18 @@ class MakeRestApiCall:
                     )
                 )
         self.server_url = base + API_BASE_PATH
-        self.api_id = config.get("api_id")
-        self.password = config.get("password")
-        self.client_id = config.get("client_id") or "fortigatecloud"
-        self.verify_ssl = config.get("verify_ssl", True)
+        self.api_id = cfg.api_id
+        self.password = cfg.password.get_secret_value() if cfg.password else None
+        self.client_id = cfg.client_id
+        self.verify_ssl = cfg.verify_ssl
         self.authenticated = False
-        self.headers = {}
+        self.headers: dict[str, str] = {}
         self.login()
 
-    def _cache_key(self):
+    def _cache_key(self) -> tuple[Optional[str], str, str]:
         return (self.api_id, self.client_id, self.server_url)
 
-    def _post_token(self, data):
+    def _post_token(self, data: dict[str, Any]) -> dict[str, Any]:
         """POST one grant to the FortiCloud IAM token endpoint; return the
         validated response body (access_token presence is verified here)."""
         try:
@@ -76,7 +78,7 @@ class MakeRestApiCall:
             raise ConnectorError(ERROR_MESSAGES["time_out"]) from err
 
         try:
-            body = response.json()
+            body: dict[str, Any] = response.json()
         except ValueError:
             raise ConnectorError(
                 "Unexpected non-JSON response from the FortiCloud IAM token "
@@ -99,7 +101,7 @@ class MakeRestApiCall:
             )
         return body
 
-    def login(self):
+    def login(self) -> None:
         key = self._cache_key()
         cached = _TOKEN_CACHE.get(key)
         if cached and cached["expires_at"] - _TOKEN_EXPIRY_BUFFER > time.time():
@@ -144,8 +146,16 @@ class MakeRestApiCall:
         self.headers = {"Authorization": "Bearer {0}".format(body["access_token"])}
         self.authenticated = True
 
-    def make_request(self, endpoint="", params=None, method="GET", headers=None, json_data=None,
-                     data=None, ok_statuses=None):
+    def make_request(
+        self,
+        endpoint: str = "",
+        params: Optional[dict[str, Any]] = None,
+        method: str = "GET",
+        headers: Optional[dict[str, str]] = None,
+        json_data: Any = None,
+        data: Optional[str] = None,
+        ok_statuses: Optional[tuple[int, ...]] = None,
+    ) -> Any:
         """Issue one FortiGate Cloud API call.
 
         headers: per-call header overrides merged over the authenticated

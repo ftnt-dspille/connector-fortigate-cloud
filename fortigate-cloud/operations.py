@@ -4,6 +4,8 @@
   FORTINET CONFIDENTIAL & FORTINET PROPRIETARY SOURCE CODE
   Copyright end """
 
+from typing import Any, Callable
+
 from connectors.core.connector import ConnectorError, get_logger
 
 from .constants import CONNECTOR_NAME
@@ -38,7 +40,7 @@ from .make_rest_api_call import MakeRestApiCall
 logger = get_logger(CONNECTOR_NAME)
 
 
-def _check_health(config: dict) -> bool:
+def _check_health(config: dict[str, Any]) -> bool:
     """Verify the config can actually reach the FortiGate Cloud device API.
 
     A successful IAM token grant is not sufficient evidence of health: the token
@@ -54,7 +56,9 @@ def _check_health(config: dict) -> bool:
     return True
 
 
-operations = {
+Operation = Callable[[dict[str, Any], dict[str, Any]], Any]
+
+operations: dict[str, Operation] = {
     "get_devices": get_devices,
     "get_device": get_device,
     "add_device": add_device,

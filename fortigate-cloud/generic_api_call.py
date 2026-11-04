@@ -4,19 +4,13 @@
   FORTINET CONFIDENTIAL & FORTINET PROPRIETARY SOURCE CODE
   Copyright end """
 
-from connectors.core.connector import ConnectorError
+from typing import Any
 
 from .make_rest_api_call import MakeRestApiCall
+from .models import GenericApiCallParams, parse_params
 
 
-def generic_api_call(config: dict, params: dict) -> dict:
-    method = (params.get("method") or "GET").upper()
-    endpoint = params.get("endpoint")
-    if not endpoint:
-        raise ConnectorError("'endpoint' is a required parameter, for example: /devices")
-    if not endpoint.startswith("/"):
-        endpoint = "/" + endpoint
-    payload = params.get("payload") or None
-
+def generic_api_call(config: dict[str, Any], params: dict[str, Any]) -> Any:
+    p = parse_params(GenericApiCallParams, params)
     fgc = MakeRestApiCall(config=config)
-    return fgc.make_request(endpoint=endpoint, method=method, json_data=payload)
+    return fgc.make_request(endpoint=p.endpoint, method=p.method, json_data=p.payload)

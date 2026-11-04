@@ -442,17 +442,22 @@ def test_every_declared_operation_is_implemented(ops):
     assert declared == set(ops.operations), 'info.json and operations dict disagree'
 
 
-def test_every_operation_param_is_read_by_its_action(ops):
-    """Each parameter declared in info.json must be consumed by the action, or it
-    silently does nothing at runtime."""
-    import inspect
+def test_every_operation_param_matches_its_model(ops):
+    """info.json and the typed params models must declare the same parameters:
+    a declared parameter the model lacks is silently dropped at runtime, and a
+    model field the form never offers can never be set from a playbook."""
     import pathlib
+    import sys
+    models = sys.modules['fsr_test_pkg_fortigate_cloud.models']
     info = json.loads((pathlib.Path(__file__).resolve().parent.parent /
                        'fortigate-cloud' / 'info.json').read_text())
+    declared_ops = {op['operation'] for op in info['operations']}
+    assert declared_ops == set(models.OPERATION_PARAMS) == set(ops.operations)
     problems = []
     for op in info['operations']:
-        src = inspect.getsource(ops.operations[op['operation']])
-        for param in op['parameters']:
-            if f"\"{param['name']}\"" not in src and f"'{param['name']}'" not in src:
-                problems.append(f"{op['operation']}: {param['name']}")
-    assert not problems, f"declared but unused parameters: {problems}"
+        declared = {param['name'] for param in op['parameters']}
+        fields = set(models.OPERATION_PARAMS[op['operation']].model_fields)
+        if declared != fields:
+            problems.append(f"{op['operation']}: only in info.json {sorted(declared - fields)}, "
+                            f"only in model {sorted(fields - declared)}")
+    assert not problems, problems
