@@ -31,6 +31,11 @@
   without notice.
 - Run CLI Script executes real commands on the device. Run only scripts you
   trust.
+- Provisioning a new FortiGate into FortiGate Cloud (and authorizing it) is
+  not available through this API: FortiGate Cloud's provisioning calls need a
+  signed-in browser session and are not reachable with the IAM API user. Use
+  the FortiZTP connector to send a FortiGate to FortiGate Cloud and authorize
+  it, then manage it with this connector.
 
 #### 1.3.0
 
