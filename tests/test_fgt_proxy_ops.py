@@ -259,6 +259,45 @@ def test_block_ip_fresh_inbound_flow(ops, config, router):
     assert move['params'] == {'action': 'move', 'before': 1}
 
 
+def test_block_ip_reads_policy_id_from_top_level_mkey(ops, config, router):
+    addr_name = 'FSR-BLOCK-203_0_113_77'
+    initial = {'results': [policy(1, 'Home-to-Internet')], 'matched_count': 1}
+    created = _created_list([policy(1, 'Home-to-Internet')], addr_name, 'INBOUND')
+    moved = {'results': [policy(99, addr_name + '-INBOUND'), policy(1, 'Home-to-Internet')],
+             'matched_count': 2}
+    router.add('GET', '/address/' + addr_name, FakeResponse(status=404, payload=NOT_FOUND))
+    router.add('POST', '/cmdb/firewall/address', FakeResponse(payload={'revision_changed': True}))
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=initial))
+    router.add('POST', '/cmdb/firewall/policy',
+               FakeResponse(payload={'mkey': 99, 'status': 'success', 'revision_changed': True}))
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=created))
+    router.add('PUT', '/cmdb/firewall/policy/99', FakeResponse(payload={'revision_changed': True}))
+    router.add('GET', '/cmdb/firewall/policy', FakeResponse(payload=moved),
+               FakeResponse(payload=moved))
+
+    result = ops.operations['block_ip'](config, {'sn': SN, 'ip': '203.0.113.77', 'direction': 'inbound'})
+
+    assert result['address'] == {'name': addr_name, 'reused': False, 'response': {'revision_changed': True}}
+    assert result['policies'] == [{'name': addr_name + '-INBOUND', 'policyid': 99,
+                                   'created': True, 'moved_to_top': True, 'position': 0}]
+
+    create_addr = api_calls(router)[1]
+    assert create_addr['json'] == {'name': addr_name, 'type': 'ipmask',
+                                   'subnet': '203.0.113.77 255.255.255.255',
+                                   'comment': 'Created by FortiSOAR fortigate-cloud block_ip'}
+    create_pol = api_calls(router)[3]
+    assert create_pol['json']['action'] == 'deny'
+    assert create_pol['json']['srcaddr'] == [{'name': addr_name}]
+    assert create_pol['json']['dstaddr'] == [{'name': 'all'}]
+    assert create_pol['json']['srcintf'] == [{'name': 'any'}]
+    assert create_pol['json']['dstintf'] == [{'name': 'any'}]
+    assert create_pol['json']['status'] == 'enable'
+    move = api_calls(router)[5]
+    assert move['method'] == 'PUT'
+    assert move['url'] == fgt_url('api/v2/cmdb/firewall/policy/99')
+    assert move['params'] == {'action': 'move', 'before': 1}
+
+
 def test_block_ip_reuses_existing_address_and_policy(ops, config, router):
     addr_name = 'FSR-BLOCK-203_0_113_77'
     router.add('GET', '/address/' + addr_name,

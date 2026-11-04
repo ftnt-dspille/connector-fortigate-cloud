@@ -419,8 +419,14 @@ def block_ip(config: dict, params: dict) -> dict:
             json_data=body,
         )
         created_policy = None
+        # The proxy puts the new id at the top level ({"mkey": 1, "status":
+        # "success", ...}); older/other shapes nest it under "results".
+        if isinstance(response, dict):
+            created_policy = response.get("mkey") or response.get("policyid")
         resp_results = response.get("results") if isinstance(response, dict) else None
-        if isinstance(resp_results, dict):
+        if created_policy is not None:
+            pass
+        elif isinstance(resp_results, dict):
             created_policy = resp_results.get("mkey") or resp_results.get("policyid")
         elif isinstance(resp_results, list) and resp_results:
             created_policy = resp_results[0].get("policyid")
